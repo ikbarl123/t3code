@@ -96,3 +96,86 @@ it.effect(
       }
     }),
 );
+
+it.effect(
+  "captures, diffs, and restores linkedWorkspaces alongside the primary scope cwd",
+  () =>
+    Effect.gen(function* () {
+      const scope: OrchestrationV2CheckpointScope = {
+        id: CheckpointScopeId.make("checkpoint-scope:multi-repo"),
+        threadId: ThreadId.make("thread:multi-repo"),
+        runId: RunId.make("run:multi-repo:1"),
+        nodeId: NodeId.make("node:multi-repo:1"),
+        parentScopeId: null,
+        providerThreadId: ProviderThreadId.make("provider-thread:multi-repo"),
+        kind: "root_run",
+        ordinalWithinParent: 0,
+        advancesAppRunCount: true,
+        cwd: "/repo/docs",
+        createdAt: DateTime.makeUnsafe("2026-07-28T00:00:00.000Z"),
+      };
+      const linkedWorkspaces = [
+        {
+          id: "mercusuar",
+          label: "mercusuar",
+          workspaceRoot: "/repo/mercusuar",
+        },
+      ];
+      const capturedCwds: string[] = [];
+      const restoredCwds: string[] = [];
+
+      const layerTest = CheckpointService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            Layer.mock(CheckpointStore.CheckpointStore)({
+              isGitRepository: () => Effect.succeed(true),
+              hasCheckpointRef: () => Effect.succeed(true),
+              captureCheckpoint: ({ cwd }) =>
+                Effect.sync(() => {
+                  capturedCwds.push(cwd);
+                }),
+              diffCheckpoints: ({ cwd }) =>
+                Effect.succeed(
+                  cwd === "/repo/docs"
+                    ? "2\t0\tdocs/plan.md\0"
+                    : "5\t1\tsrc/index.ts\0",
+                ),
+              listAuthoredPaths: () => Effect.succeed(null),
+              restoreCheckpoint: ({ cwd }) =>
+                Effect.sync(() => {
+                  restoredCwds.push(cwd);
+                  return true;
+                }),
+            }),
+          ),
+        ),
+        Layer.provideMerge(NodeCrypto.layer),
+      );
+
+      yield* Effect.gen(function* () {
+        const checkpoints = yield* CheckpointService.CheckpointServiceV2;
+        const checkpoint = yield* checkpoints.capture({
+          scope,
+          ordinalWithinScope: 1,
+          runId: scope.runId!,
+          nodeId: scope.nodeId!,
+          appRunOrdinal: 1,
+          capturedAt: scope.createdAt,
+          linkedWorkspaces,
+        });
+
+        assert.strictEqual(checkpoint.status, "ready");
+        assert.deepEqual(
+          checkpoint.files.map((file) => file.path),
+          ["docs/plan.md", "[mercusuar]/src/index.ts"],
+        );
+        assert.strictEqual(checkpoint.repoSnapshots?.length, 1);
+        assert.strictEqual(checkpoint.repoSnapshots?.[0]?.workspaceRoot, "/repo/mercusuar");
+        assert.strictEqual(checkpoint.repoSnapshots?.[0]?.label, "mercusuar");
+
+        yield* checkpoints.restore({ scope, checkpoint });
+        assert.deepEqual(restoredCwds, ["/repo/docs", "/repo/mercusuar"]);
+      }).pipe(Effect.provide(layerTest));
+    }),
+);

@@ -23,6 +23,7 @@ export type ReviewDiffPreviewInput = typeof ReviewDiffPreviewInput.Type;
 
 export const ReviewBranchCommitsInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
+  cwds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   baseRef: Schema.optional(TrimmedNonEmptyString),
 });
 export type ReviewBranchCommitsInput = typeof ReviewBranchCommitsInput.Type;
@@ -33,6 +34,8 @@ export const ReviewBranchCommitsResult = Schema.Struct({
       sha: Schema.String,
       subject: Schema.String,
       committedAt: Schema.String,
+      cwd: Schema.optionalKey(TrimmedNonEmptyString),
+      repoLabel: Schema.optionalKey(Schema.String),
     }),
   ),
   truncated: Schema.Boolean,

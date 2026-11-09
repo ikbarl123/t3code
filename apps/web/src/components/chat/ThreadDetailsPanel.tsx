@@ -2,6 +2,7 @@ import type {
   EditorId,
   EnvironmentId,
   ProjectId,
+  ProjectLinkedWorkspace,
   ProjectScript,
   ResolvedKeybindingsConfig,
   ThreadId,
@@ -54,6 +55,7 @@ interface ThreadDetailsPanelProps extends Pick<
   isServerThread: boolean;
   draftId?: DraftId;
   activeProjectName: string | undefined;
+  linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace> | undefined;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -89,9 +91,24 @@ interface ThreadDetailsPanelProps extends Pick<
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const visible = useClientSettings(resolveThreadDetailsVisibility);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const linkedWorkspaces = props.linkedWorkspaces ?? [];
+  const repoOptions = props.gitCwd
+    ? [
+        {
+          id: "primary",
+          label: props.activeProjectName ?? "Primary",
+          workspaceRoot: props.gitCwd,
+        },
+        ...linkedWorkspaces,
+      ]
+    : [];
+  const [selectedRepoCwd, setSelectedRepoCwd] = useState<string | null>(null);
+  const activeGitCwd =
+    repoOptions.find((repo) => repo.workspaceRoot === selectedRepoCwd)?.workspaceRoot ??
+    props.gitCwd;
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,
-    props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
+    props.activeProjectScripts && visible.scripts ? activeGitCwd : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
   const branchToolbarProps = {
@@ -189,7 +206,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         keybindings={props.keybindings}
                         environmentId={props.environmentId}
                         availableEditors={props.availableEditors}
-                        openInCwd={props.gitCwd}
+                        openInCwd={activeGitCwd}
                         enableShortcut={props.openInShortcutEnabled}
                         displayMode="panel"
                       />
@@ -220,15 +237,43 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   separated={density === "full"}
                 >
                   <div className="flex flex-col">
-                    {show.branch ? (
-                      <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
+                    {repoOptions.length > 1 ? (
+                      <div className="flex flex-wrap items-center gap-1 px-3 py-1.5">
+                        {repoOptions.map((repo) => {
+                          const isSelected = repo.workspaceRoot === activeGitCwd;
+                          return (
+                            <button
+                              key={repo.workspaceRoot}
+                              type="button"
+                              onClick={() => setSelectedRepoCwd(repo.workspaceRoot)}
+                              className={cn(
+                                "rounded px-2 py-0.5 text-2xs font-medium transition-colors",
+                                isSelected
+                                  ? "bg-accent text-accent-foreground"
+                                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                              )}
+                              title={repo.workspaceRoot}
+                            >
+                              {repo.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     ) : null}
-                    {show.git ? (
+                    {show.branch ? (
+                      <BranchToolbar
+                        layout="panel"
+                        panelSection="branch"
+                        {...branchToolbarProps}
+                        worktreePath={activeGitCwd !== props.gitCwd ? activeGitCwd : props.worktreePath}
+                      />
+                    ) : null}
+                    {show.git && activeGitCwd ? (
                       <GitActionsControl
                         compact={density !== "full"}
                         showActions={visible.gitActions}
                         showChanges={visible.changes}
-                        gitCwd={props.gitCwd}
+                        gitCwd={activeGitCwd}
                         activeThreadRef={activeThreadRef}
                         {...(props.draftId ? { draftId: props.draftId } : {})}
                         {...(props.onOpenChanges ? { onOpenChanges: props.onOpenChanges } : {})}

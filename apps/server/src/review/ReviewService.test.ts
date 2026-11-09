@@ -22,6 +22,7 @@ function layer(input: {
   readonly worktreesDirectory?: string;
   readonly previousWorktreesDirectories?: ReadonlyArray<string>;
   readonly projectRoots?: ReadonlyArray<string> | "unavailable";
+  readonly linkedWorkspaceRoots?: ReadonlyArray<string>;
   readonly threadWorktrees?: ReadonlyArray<{ worktreePath: string; deleted?: boolean }>;
   readonly gitWorktrees?: ReadonlyArray<string>;
 }) {
@@ -62,6 +63,17 @@ function layer(input: {
                   workspaceRoot,
                   defaultModelSelection: null,
                   scripts: [],
+                  ...(index === 0 &&
+                  input.linkedWorkspaceRoots &&
+                  input.linkedWorkspaceRoots.length > 0
+                    ? {
+                        linkedWorkspaces: input.linkedWorkspaceRoots.map((root, linkedIdx) => ({
+                          id: `linked-${linkedIdx}`,
+                          label: `linked-${linkedIdx}`,
+                          workspaceRoot: root,
+                        })),
+                      }
+                    : {}),
                   createdAt: "2026-01-01T00:00:00.000Z",
                   updatedAt: "2026-01-01T00:00:00.000Z",
                 })),
@@ -257,6 +269,32 @@ describe("ReviewService", () => {
         ),
       );
       assert.strictEqual(result.cwd, checkout);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("allows project linkedWorkspaces roots outside the primary workspaceRoot", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-docs-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const linkedServiceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-review-service-",
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getDiffPreview({ cwd: linkedServiceRoot });
+      }).pipe(
+        Effect.provide(
+          layer({
+            workspaceRoot,
+            baseDir,
+            projectRoots: [workspaceRoot],
+            linkedWorkspaceRoots: [linkedServiceRoot],
+          }),
+        ),
+      );
+      assert.strictEqual(result.cwd, linkedServiceRoot);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

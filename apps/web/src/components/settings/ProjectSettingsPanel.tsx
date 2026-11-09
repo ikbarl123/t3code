@@ -5,7 +5,11 @@ import { useEnvironmentsWithScope } from "../../state/session";
 import { mapAtomCommandResult, settlePromise } from "@t3tools/client-runtime/state/runtime";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
-import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type ProjectLinkedWorkspace,
+  type SidebarProjectGroupingMode,
+} from "@t3tools/contracts";
 import {
   checkProjectAccess,
   reportProjectFailure,
@@ -431,6 +435,129 @@ function ProjectDetail({
       ) : null}
     </div>
   );
+  const [newLinkedRepoLabel, setNewLinkedRepoLabel] = useState("");
+  const [newLinkedRepoPath, setNewLinkedRepoPath] = useState("");
+  const [isSavingLinkedRepos, setIsSavingLinkedRepos] = useState(false);
+  const currentLinkedWorkspaces: ReadonlyArray<ProjectLinkedWorkspace> =
+    representative.linkedWorkspaces ?? [];
+
+  const handleAddLinkedRepo = async () => {
+    const trimmedPath = newLinkedRepoPath.trim();
+    if (!trimmedPath) {
+      toastManager.add({ type: "warning", title: "Repository path cannot be empty" });
+      return;
+    }
+    if (
+      trimmedPath === representative.workspaceRoot ||
+      currentLinkedWorkspaces.some((item) => item.workspaceRoot === trimmedPath)
+    ) {
+      toastManager.add({
+        type: "warning",
+        title: "Repository already linked",
+        description: `${trimmedPath} is already attached to this project.`,
+      });
+      return;
+    }
+    const inferredLabel =
+      newLinkedRepoLabel.trim() ||
+      trimmedPath.split(/[\\/]/).filter(Boolean).pop() ||
+      "repo";
+    const id = `${inferredLabel.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}-${Date.now().toString(36)}`;
+    const nextLinkedWorkspaces: ReadonlyArray<ProjectLinkedWorkspace> = [
+      ...currentLinkedWorkspaces,
+      { id, label: inferredLabel, workspaceRoot: trimmedPath },
+    ];
+    setIsSavingLinkedRepos(true);
+    const result = await updateAllMembers(
+      { linkedWorkspaces: nextLinkedWorkspaces },
+      "Failed to link repository",
+    );
+    setIsSavingLinkedRepos(false);
+    if (result._tag === "Success") {
+      setNewLinkedRepoLabel("");
+      setNewLinkedRepoPath("");
+    }
+  };
+
+  const handleRemoveLinkedRepo = async (workspaceRoot: string) => {
+    const nextLinkedWorkspaces = currentLinkedWorkspaces.filter(
+      (item) => item.workspaceRoot !== workspaceRoot,
+    );
+    setIsSavingLinkedRepos(true);
+    await updateAllMembers(
+      { linkedWorkspaces: nextLinkedWorkspaces },
+      "Failed to remove linked repository",
+    );
+    setIsSavingLinkedRepos(false);
+  };
+
+  const linkedRepositoriesSection = (
+    <SettingsSection id="project-linked-repositories" title="Linked Repositories">
+      <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
+        Attach additional Git repositories (for example microservices when this project is a centralized docs vault) so turn checkpoints, rollbacks, diffs, and commit history track every repository together.
+      </p>
+      {currentLinkedWorkspaces.map((repo) => (
+        <SettingsRow
+          key={repo.id}
+          title={repo.label}
+          description={repo.workspaceRoot}
+          control={
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canEditGroup || isSavingLinkedRepos}
+              onClick={() => void handleRemoveLinkedRepo(repo.workspaceRoot)}
+              aria-label={`Remove linked repository ${repo.label}`}
+            >
+              <Trash2Icon className="mr-1.5 size-3.5" />
+              Remove
+            </Button>
+          }
+        />
+      ))}
+      <SettingsRow
+        title="Add linked repository"
+        description="Provide an optional short label and the absolute path to the Git repository on disk."
+        control={
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <Input
+              size="sm"
+              className="w-full sm:w-36"
+              placeholder="Label (e.g. auth-service)"
+              aria-label="Linked repository label"
+              disabled={!canEditGroup || isSavingLinkedRepos}
+              value={newLinkedRepoLabel}
+              onChange={(event) => setNewLinkedRepoLabel(event.currentTarget.value)}
+            />
+            <Input
+              size="sm"
+              className="w-full sm:w-64"
+              placeholder="/absolute/path/to/repo"
+              aria-label="Linked repository path"
+              disabled={!canEditGroup || isSavingLinkedRepos}
+              value={newLinkedRepoPath}
+              onChange={(event) => setNewLinkedRepoPath(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleAddLinkedRepo();
+                }
+              }}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canEditGroup || isSavingLinkedRepos || !newLinkedRepoPath.trim()}
+              onClick={() => void handleAddLinkedRepo()}
+            >
+              Add repository
+            </Button>
+          </div>
+        }
+      />
+    </SettingsSection>
+  );
+
   const checkoutChoices = (
     <SettingsSection title="Checkouts">
       <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
@@ -655,6 +782,7 @@ function ProjectDetail({
         </SettingsSection>
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
+        {linkedRepositoriesSection}
         {checkoutChoices}
         <SettingsSection title="Danger">
           <SettingsRow

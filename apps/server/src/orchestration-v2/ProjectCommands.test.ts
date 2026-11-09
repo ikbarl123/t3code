@@ -111,6 +111,36 @@ describe("planProjectCommand", () => {
     assert.notProperty(untouched, "archivedAt");
   });
 
+  it("propagates linkedWorkspaces on project.create and project.meta.update", () => {
+    const linkedWorkspaces = [
+      { id: "mercusuar", label: "mercusuar", workspaceRoot: "/tmp/mercusuar" },
+    ];
+    const created = payloadOf(
+      plan({
+        type: "project.create",
+        commandId: CommandId.make("cmd-create-linked"),
+        projectId,
+        title: "Docs",
+        workspaceRoot: "/tmp/docs",
+        linkedWorkspaces,
+      }),
+    );
+    assert.deepEqual(created.linkedWorkspaces, linkedWorkspaces);
+
+    const updated = payloadOf(
+      plan(
+        {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-update-linked"),
+          projectId,
+          linkedWorkspaces: [],
+        },
+        { project: row({ linkedWorkspaces }) },
+      ),
+    );
+    assert.deepEqual(updated.linkedWorkspaces, []);
+  });
+
   it("rejects a workspace root held by another active project", () => {
     const owner = row({
       projectId: ProjectId.make("project-existing"),

@@ -190,6 +190,9 @@ export const make = Effect.gen(function* () {
     autoPull: row.autoPull,
     projectIcon: row.projectIcon,
     scripts: row.scripts,
+    ...(row.linkedWorkspaces && row.linkedWorkspaces.length > 0
+      ? { linkedWorkspaces: row.linkedWorkspaces }
+      : {}),
     pinnedAt: row.pinnedAt,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
@@ -234,6 +237,25 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
+
+  const normalizeLinkedWorkspaces = (input: {
+    readonly projectId?: ProjectId;
+    readonly linkedWorkspaces: ProjectCreateInput["linkedWorkspaces"];
+  }) =>
+    input.linkedWorkspaces === undefined
+      ? Effect.succeed(undefined)
+      : Effect.forEach(input.linkedWorkspaces, (item) =>
+          normalizeWorkspaceRoot({
+            ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+            workspaceRoot: item.workspaceRoot,
+            createIfMissing: false,
+          }).pipe(
+            Effect.map((workspaceRoot) => ({
+              ...item,
+              workspaceRoot,
+            })),
+          ),
+        );
 
   const commit = Effect.fn("ProjectService.commit")(function* (command: ProjectCommand) {
     const { projectId } = command;
@@ -358,6 +380,10 @@ export const make = Effect.gen(function* () {
         workspaceRoot: input.workspaceRoot,
         createIfMissing: input.createWorkspaceRootIfMissing ?? false,
       });
+      const linkedWorkspaces = yield* normalizeLinkedWorkspaces({
+        projectId: input.projectId,
+        linkedWorkspaces: input.linkedWorkspaces,
+      });
       yield* commit({
         type: "project.create",
         commandId: input.commandId,
@@ -365,6 +391,7 @@ export const make = Effect.gen(function* () {
         title: input.title,
         workspaceRoot,
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+        ...(linkedWorkspaces === undefined ? {} : { linkedWorkspaces }),
       });
       yield* projectEnrichment.invalidate([workspaceRoot]);
       return yield* readCommitted(input.projectId);
@@ -385,6 +412,10 @@ export const make = Effect.gen(function* () {
               projectId: input.projectId,
               workspaceRoot: input.workspaceRoot,
             });
+      const linkedWorkspaces = yield* normalizeLinkedWorkspaces({
+        projectId: input.projectId,
+        linkedWorkspaces: input.linkedWorkspaces,
+      });
       yield* commit({
         type: "project.meta.update",
         commandId: input.commandId,
@@ -401,6 +432,7 @@ export const make = Effect.gen(function* () {
           ? {}
           : { defaultThreadEnvMode: input.defaultThreadEnvMode }),
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+        ...(linkedWorkspaces === undefined ? {} : { linkedWorkspaces }),
         ...(input.pinned === undefined ? {} : { pinned: input.pinned }),
         ...(input.archived === undefined ? {} : { archived: input.archived }),
       });

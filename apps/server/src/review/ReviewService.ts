@@ -93,21 +93,73 @@ export const make = Effect.gen(function* () {
     });
   });
 
+  const getSingleCwdBranchCommits = (input: ReviewBranchCommitsInput) =>
+    Effect.gen(function* () {
+      yield* assertWorkspaceBoundCwd("ReviewService.getBranchCommits", input.cwd);
+
+      const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
+      if (!handle) return { commits: [], truncated: false };
+      if (handle.kind !== "git") {
+        return yield* new VcsUnsupportedOperationError({
+          operation: "ReviewService.getBranchCommits",
+          kind: handle.kind,
+          detail: "Review commit lists require a Git repository.",
+        });
+      }
+      return yield* git.getReviewBranchCommits(input);
+    });
+
   const getBranchCommits: ReviewService["Service"]["getBranchCommits"] = Effect.fn(
     "ReviewService.getBranchCommits",
   )(function* (input) {
-    yield* assertWorkspaceBoundCwd("ReviewService.getBranchCommits", input.cwd);
-
-    const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
-    if (!handle) return { commits: [], truncated: false };
-    if (handle.kind !== "git") {
-      return yield* new VcsUnsupportedOperationError({
-        operation: "ReviewService.getBranchCommits",
-        kind: handle.kind,
-        detail: "Review commit lists require a Git repository.",
-      });
+    const requestedCwds =
+      input.cwds && input.cwds.length > 0
+        ? Array.from(new Set(input.cwds))
+        : undefined;
+    if (requestedCwds === undefined) {
+      return yield* getSingleCwdBranchCommits(input);
     }
-    return yield* git.getReviewBranchCommits(input);
+
+    const perRepoResults = yield* Effect.forEach(
+      requestedCwds,
+      (cwd) =>
+        getSingleCwdBranchCommits({
+          cwd,
+          ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
+        }).pipe(
+          Effect.map((result) => ({
+            cwd,
+            repoLabel: path.basename(cwd) || cwd,
+            commits: result.commits,
+            truncated: result.truncated,
+          })),
+          Effect.catch(() =>
+            Effect.succeed({
+              cwd,
+              repoLabel: path.basename(cwd) || cwd,
+              commits: [] as ReviewBranchCommitsResult["commits"],
+              truncated: false,
+            }),
+          ),
+        ),
+      { concurrency: 4 },
+    );
+
+    const mergedCommits = perRepoResults
+      .flatMap((repo) =>
+        repo.commits.map((commit) => ({
+          ...commit,
+          cwd: repo.cwd,
+          repoLabel: repo.repoLabel,
+        })),
+      )
+      .toSorted((left, right) => right.committedAt.localeCompare(left.committedAt));
+
+    return {
+      commits: mergedCommits.slice(0, 100),
+      truncated:
+        perRepoResults.some((repo) => repo.truncated) || mergedCommits.length > 100,
+    };
   });
 
   const getDiffPreview: ReviewService["Service"]["getDiffPreview"] = Effect.fn(

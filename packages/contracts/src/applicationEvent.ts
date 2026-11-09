@@ -14,7 +14,7 @@ import {
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import type { OrchestrationV2StoredEvent } from "./orchestrationV2.ts";
-import { ProjectScript, StoredProjectIcon } from "./project.ts";
+import { ProjectLinkedWorkspace, ProjectScript, StoredProjectIcon } from "./project.ts";
 
 export const OrchestrationClientOrigin = Schema.Struct({
   surface: Schema.optional(ClientSurface),
@@ -43,6 +43,7 @@ export const ApplicationProjectCreatedPayload = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectIcon: Schema.optional(Schema.NullOr(StoredProjectIcon)),
   scripts: Schema.Array(ProjectScript),
+  linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -60,6 +61,7 @@ export const ApplicationProjectMetaUpdatedPayload = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectIcon: Schema.optional(Schema.NullOr(StoredProjectIcon)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   updatedAt: IsoDateTime,

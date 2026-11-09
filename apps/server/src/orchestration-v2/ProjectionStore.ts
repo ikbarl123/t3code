@@ -76,6 +76,7 @@ import {
   TurnItemId,
   NodeId,
   ProjectId,
+  type ProjectLinkedWorkspace,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import {
@@ -241,13 +242,14 @@ const ProjectionCheckpointContext = Schema.Struct({
   ),
   checkpoints: Schema.Array(
     OrchestrationV2CheckpointJsonSchema.mapFields(
-      ({ scopeId, runId, ordinalWithinScope, appRunOrdinal, status, ref }) => ({
+      ({ scopeId, runId, ordinalWithinScope, appRunOrdinal, status, ref, repoSnapshots }) => ({
         scopeId,
         runId,
         ordinalWithinScope,
         appRunOrdinal,
         status,
         ref,
+        repoSnapshots,
       }),
     ),
   ),
@@ -263,6 +265,7 @@ export interface ProjectionCheckpointCaptureContext {
   readonly readyCheckpointOrdinals: ReadonlyArray<number>;
   /** Side chats share their parent's worktree and never snapshot it. */
   readonly sideChat: boolean;
+  readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
 }
 
 const RollbackTargetAttempts = Schema.Array(
@@ -5291,13 +5294,29 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               SELECT scope_id AS "scopeId", run_id AS "runId",
                 ordinal_within_scope AS "ordinalWithinScope",
                 app_run_ordinal AS "appRunOrdinal", status,
-                json_extract(payload_json, '$.ref') AS ref
+                json_extract(payload_json, '$.ref') AS ref,
+                json_extract(payload_json, '$.repoSnapshots') AS "repoSnapshotsJson"
               FROM orchestration_v2_projection_checkpoints
               WHERE thread_id = ${threadId}
               ORDER BY scope_id ASC, ordinal_within_scope ASC
             `,
             ]);
-            return yield* decodeCheckpointContext({ runs, checkpointScopes, checkpoints });
+            const parsedCheckpoints = checkpoints.map((row: Record<string, unknown>) => {
+              const { repoSnapshotsJson, ...rest } = row;
+              if (typeof repoSnapshotsJson === "string" && repoSnapshotsJson.length > 0) {
+                try {
+                  return { ...rest, repoSnapshots: JSON.parse(repoSnapshotsJson) };
+                } catch {
+                  return rest;
+                }
+              }
+              return rest;
+            });
+            return yield* decodeCheckpointContext({
+              runs,
+              checkpointScopes,
+              checkpoints: parsedCheckpoints,
+            });
           }),
         )
         .pipe(
@@ -5315,9 +5334,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql
         .withTransaction(
           Effect.gen(function* () {
-            const threadRows = yield* sql<{ readonly side_chat: number | null }>`
-          SELECT json_extract(payload_json, '$.lineage.sideChat') AS side_chat
-          FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} LIMIT 1`;
+            const threadRows = yield* sql<{
+              readonly side_chat: number | null;
+              readonly linked_workspaces_json: string | null;
+            }>`
+          SELECT
+            json_extract(t.payload_json, '$.lineage.sideChat') AS side_chat,
+            p.linked_workspaces_json AS linked_workspaces_json
+          FROM orchestration_v2_projection_threads t
+          LEFT JOIN projection_projects p ON p.project_id = t.project_id AND p.deleted_at IS NULL
+          WHERE t.thread_id = ${threadId} LIMIT 1`;
             if (threadRows[0] === undefined) {
               return yield* new ProjectionStoreThreadNotFoundError({ threadId });
             }
@@ -5358,6 +5384,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   : yield* decodeProviderThreadPayload(providerRows[0].payload_json),
               readyCheckpointOrdinals: readyRows.map(({ ordinal }) => ordinal),
               sideChat: threadRows[0].side_chat === 1,
+              linkedWorkspaces: (() => {
+                const raw = threadRows[0].linked_workspaces_json;
+                if (!raw) return undefined;
+                try {
+                  const parsed = JSON.parse(raw);
+                  return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined;
+                } catch {
+                  return undefined;
+                }
+              })(),
             };
           }),
         )

@@ -256,10 +256,21 @@ export default function DiffPanel({
         }
       : null,
   );
-  const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
-  const activeRepositoryRoot = activeThread?.worktreePath
-    ? undefined
-    : activeProject?.repositoryIdentity?.rootPath;
+  const primaryCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
+  const linkedWorkspaces = activeProject?.linkedWorkspaces ?? [];
+  const projectRepos = primaryCwd
+    ? [
+        {
+          id: "primary",
+          label: activeProject?.title ?? (primaryCwd.split(/[\\/]/).filter(Boolean).pop() ?? "Primary"),
+          workspaceRoot: primaryCwd,
+        },
+        ...linkedWorkspaces,
+      ]
+    : [];
+  const hasMultipleRepos = projectRepos.length > 1;
+  const [selectedRepoCwd, setSelectedRepoCwd] = useState<string>("all");
+  const resolvedSelectedRepo = projectRepos.find((repo) => repo.workspaceRoot === selectedRepoCwd);
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
   );
@@ -269,6 +280,24 @@ export default function DiffPanel({
     serverConfig?.availableEditors ?? [],
   );
   const getDiffFileContents = useAtomCommand(reviewEnvironment.diffFileContents);
+  const diffSelection = useDiffPanelStore((state) =>
+    selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
+  );
+  const rememberedBaseRef = useDiffPanelStore((state) =>
+    selectThreadBranchBaseRef(state, routeThreadRef),
+  );
+  const selectedCommitRecord =
+    diffSelection.kind === "commit"
+      ? (openCommitMenu ?? null)?.commits.find((c) => c.sha === diffSelection.sha)
+      : undefined;
+  const activeCwd =
+    resolvedSelectedRepo?.workspaceRoot ??
+    selectedCommitRecord?.cwd ??
+    primaryCwd;
+  const activeRepositoryRoot =
+    activeCwd === primaryCwd && !activeThread?.worktreePath
+      ? activeProject?.repositoryIdentity?.rootPath
+      : activeCwd;
   const gitStatusQuery = useEnvironmentQuery(
     activeThread !== null && activeThread !== undefined && activeCwd != null
       ? vcsEnvironment.status({
@@ -276,12 +305,6 @@ export default function DiffPanel({
           input: { cwd: activeCwd },
         })
       : null,
-  );
-  const diffSelection = useDiffPanelStore((state) =>
-    selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
-  );
-  const rememberedBaseRef = useDiffPanelStore((state) =>
-    selectThreadBranchBaseRef(state, routeThreadRef),
   );
   const toolCallSelection = diffSelection.kind === "tool-call" ? diffSelection : null;
   const isGitSelection =
@@ -361,14 +384,36 @@ export default function DiffPanel({
       fromTurnCount: selectedCheckpointRange?.fromTurnCount ?? null,
       toTurnCount: selectedCheckpointRange?.toTurnCount ?? null,
       ignoreWhitespace: diffIgnoreWhitespace,
-      cacheScope: selectedTurn ? `turn:${selectedTurn.runId}` : null,
+      workspaceRoot: resolvedSelectedRepo?.workspaceRoot ?? null,
+      cacheScope: selectedTurn
+        ? `turn:${selectedTurn.runId}:${resolvedSelectedRepo?.workspaceRoot ?? "all"}`
+        : null,
     },
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
+  const branchCommitsQuery = useEnvironmentQuery(
+    visible && isGitRepo && canReadFiles && activeThread && activeCwd
+      ? reviewEnvironment.branchCommits({
+          environmentId: activeThread.environmentId,
+          input: {
+            cwd: activeCwd,
+            ...(hasMultipleRepos && !resolvedSelectedRepo
+              ? { cwds: projectRepos.map((repo) => repo.workspaceRoot) }
+              : {}),
+            ...(rememberedBaseRef ? { baseRef: rememberedBaseRef } : {}),
+          },
+        })
+      : null,
+  );
+  const branchCommits = openCommitMenu ?? branchCommitsQuery.data;
+  const selectedCommitCwd =
+    selectedCommitSha !== null
+      ? (branchCommits?.commits.find((c) => c.sha === selectedCommitSha)?.cwd ?? activeCwd)
+      : activeCwd;
   const branchDiffPreviewInput =
-    canReadFiles && isGitSelection && activeThread && activeCwd
+    canReadFiles && isGitSelection && activeThread && selectedCommitCwd
       ? {
-          cwd: activeCwd,
+          cwd: selectedCommitCwd,
           ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
           ...(selectedCommitSha !== null ? { commitSha: selectedCommitSha } : {}),
           ignoreWhitespace: diffIgnoreWhitespace,
@@ -384,7 +429,7 @@ export default function DiffPanel({
         }
       : undefined;
   const canRefreshGitDiff =
-    isGitRepo && isGitSelection && activeThread != null && activeCwd != null;
+    isGitRepo && isGitSelection && activeThread != null && selectedCommitCwd != null;
   // Read under the workspace mutation id, so each mutation refetches the diff; the panel stays
   // mounted while hidden, so a mutation made then is already reflected when it shows.
   const branchDiffPreview = useEnvironmentQuery(
@@ -398,18 +443,6 @@ export default function DiffPanel({
         )
       : null,
   );
-  const branchCommitsQuery = useEnvironmentQuery(
-    visible && isGitRepo && canReadFiles && activeThread && activeCwd
-      ? reviewEnvironment.branchCommits({
-          environmentId: activeThread.environmentId,
-          input: {
-            cwd: activeCwd,
-            ...(rememberedBaseRef ? { baseRef: rememberedBaseRef } : {}),
-          },
-        })
-      : null,
-  );
-  const branchCommits = openCommitMenu ?? branchCommitsQuery.data;
   const activeThreadRefreshKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
     : null;
@@ -722,12 +755,34 @@ export default function DiffPanel({
     }
   }, [collapseScopeKey, selectedFilePath, selectedFileRevealRequestId, revealDiffFile]);
 
-  const openDiffFile = (filePath: string) => {
+  const resolvePrefixedDiffFileTarget = (rawFilePath: string) => {
+    const match = /^\[([^\]]+)\]\/(.+)$/.exec(rawFilePath);
+    if (match) {
+      const repoLabel = match[1]!;
+      const innerPath = match[2]!;
+      const matchedRepo = projectRepos.find((repo) => repo.label === repoLabel);
+      if (matchedRepo) {
+        return {
+          filePath: innerPath,
+          workspaceRoot: matchedRepo.workspaceRoot,
+          repositoryRoot: matchedRepo.workspaceRoot,
+        };
+      }
+    }
+    return {
+      filePath: rawFilePath,
+      workspaceRoot: selectedCommitCwd ?? activeCwd,
+      repositoryRoot: activeRepositoryRoot,
+    };
+  };
+
+  const openDiffFile = (rawFilePath: string) => {
+    const resolvedTarget = resolvePrefixedDiffFileTarget(rawFilePath);
     openDiffFilePrimaryAction({
       threadRef: routeThreadRef,
-      filePath,
-      activeCwd,
-      repositoryRoot: activeRepositoryRoot,
+      filePath: resolvedTarget.filePath,
+      activeCwd: resolvedTarget.workspaceRoot,
+      repositoryRoot: resolvedTarget.repositoryRoot,
       openInEditor: (targetPath) => {
         void (async () => {
           const result = await openInPreferredEditor(targetPath);
@@ -816,7 +871,43 @@ export default function DiffPanel({
 
   const headerRow = (
     <>
-      <div className="@container/diff-refs flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
+      <div className="@container/diff-refs flex min-w-0 flex-1 items-center gap-2 [-webkit-app-region:no-drag]">
+        {hasMultipleRepos ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button size="xs" variant="outline" />}
+              className="max-w-40 shrink-0"
+              aria-label={`Repository: ${resolvedSelectedRepo?.label ?? "All repos"}`}
+            >
+              <span className="truncate">{resolvedSelectedRepo?.label ?? "All repos"}</span>
+              <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuRadioGroup
+                value={resolvedSelectedRepo?.workspaceRoot ?? "all"}
+                onValueChange={(value) => setSelectedRepoCwd(value)}
+              >
+                <DropdownMenuRadioItem value="all" closeOnClick>
+                  <span>All repos ({projectRepos.length})</span>
+                </DropdownMenuRadioItem>
+                {projectRepos.map((repo) => (
+                  <DropdownMenuRadioItem
+                    key={repo.workspaceRoot}
+                    value={repo.workspaceRoot}
+                    closeOnClick
+                  >
+                    <span className="flex flex-col">
+                      <span className="font-medium">{repo.label}</span>
+                      <span className="max-w-56 truncate text-2xs text-muted-foreground">
+                        {repo.workspaceRoot}
+                      </span>
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button size="xs" variant="secondary" />}
@@ -924,7 +1015,12 @@ export default function DiffPanel({
                               />
                             }
                           >
-                            <span className="flex items-center gap-3">
+                            <span className="flex items-center gap-2">
+                              {hasMultipleRepos && commit.repoLabel ? (
+                                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+                                  {commit.repoLabel}
+                                </span>
+                              ) : null}
                               <span className="min-w-0 flex-1 truncate">{commit.subject}</span>
                               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                                 {formatRelativeTimeLabel(commit.committedAt)}

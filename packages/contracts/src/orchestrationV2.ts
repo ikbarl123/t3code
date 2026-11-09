@@ -1405,6 +1405,16 @@ export const OrchestrationV2CheckpointFileTotals = Schema.Struct({
 });
 export type OrchestrationV2CheckpointFileTotals = typeof OrchestrationV2CheckpointFileTotals.Type;
 
+export const OrchestrationV2RepoCheckpointSnapshot = Schema.Struct({
+  workspaceRoot: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  ref: CheckpointRef,
+  status: Schema.Literals(["ready", "missing", "error", "stale"]),
+  files: Schema.Array(OrchestrationV2CheckpointFileSummary),
+});
+export type OrchestrationV2RepoCheckpointSnapshot =
+  typeof OrchestrationV2RepoCheckpointSnapshot.Type;
+
 export const OrchestrationV2Checkpoint = Schema.Struct({
   id: CheckpointId,
   threadId: ThreadId,
@@ -1418,6 +1428,7 @@ export const OrchestrationV2Checkpoint = Schema.Struct({
   status: Schema.Literals(["ready", "missing", "error", "stale"]),
   files: Schema.Array(OrchestrationV2CheckpointFileSummary),
   filesTotal: Schema.optionalKey(OrchestrationV2CheckpointFileTotals),
+  repoSnapshots: Schema.optional(Schema.Array(OrchestrationV2RepoCheckpointSnapshot)),
   capturedAt: Schema.DateTimeUtc,
 });
 export type OrchestrationV2Checkpoint = typeof OrchestrationV2Checkpoint.Type;
