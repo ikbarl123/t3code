@@ -286,19 +286,8 @@ export default function DiffPanel({
   const rememberedBaseRef = useDiffPanelStore((state) =>
     selectThreadBranchBaseRef(state, routeThreadRef),
   );
-  const selectedCommitRecord =
-    diffSelection.kind === "commit"
-      ? (openCommitMenu ?? null)?.commits.find((c) => c.sha === diffSelection.sha)
-      : undefined;
-  const activeCwd =
-    resolvedSelectedRepo?.workspaceRoot ??
-    selectedCommitRecord?.cwd ??
-    primaryCwd;
-  const activeRepositoryRoot =
-    activeCwd === primaryCwd && !activeThread?.worktreePath
-      ? activeProject?.repositoryIdentity?.rootPath
-      : activeCwd;
-  const gitStatusQuery = useEnvironmentQuery(
+  const activeCwd = resolvedSelectedRepo?.workspaceRoot ?? primaryCwd;
+  const primaryGitStatusQuery = useEnvironmentQuery(
     activeThread !== null && activeThread !== undefined && activeCwd != null
       ? vcsEnvironment.status({
           environmentId: activeThread.environmentId,
@@ -321,7 +310,7 @@ export default function DiffPanel({
       : null,
   );
   const toolCallItem = toolCallDetail.data?.item;
-  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const isGitRepo = primaryGitStatusQuery.data?.isRepo ?? true;
   const turnDiffSummaries = useThreadCheckpointSummaries(routeThreadRef);
   const orderedTurnDiffSummaries = turnDiffSummaries.toSorted((left, right) => {
     if (left.checkpointTurnCount !== right.checkpointTurnCount) {
@@ -410,6 +399,18 @@ export default function DiffPanel({
     selectedCommitSha !== null
       ? (branchCommits?.commits.find((c) => c.sha === selectedCommitSha)?.cwd ?? activeCwd)
       : activeCwd;
+  const activeRepositoryRoot =
+    selectedCommitCwd === primaryCwd && !activeThread?.worktreePath
+      ? activeProject?.repositoryIdentity?.rootPath
+      : selectedCommitCwd;
+  const gitStatusQuery = useEnvironmentQuery(
+    activeThread !== null && activeThread !== undefined && selectedCommitCwd != null
+      ? vcsEnvironment.status({
+          environmentId: activeThread.environmentId,
+          input: { cwd: selectedCommitCwd },
+        })
+      : null,
+  );
   const branchDiffPreviewInput =
     canReadFiles && isGitSelection && activeThread && selectedCommitCwd
       ? {
@@ -1508,12 +1509,13 @@ export default function DiffPanel({
                     const filePath = title?.textContent?.trim();
                     if (!filePath) return;
                     event.preventDefault();
+                    const resolvedTarget = resolvePrefixedDiffFileTarget(filePath);
                     onFileContextMenu(
                       {
                         environmentId: activeThread?.environmentId ?? null,
-                        filePath,
-                        workspaceRoot: activeCwd,
-                        repositoryRoot: activeRepositoryRoot,
+                        filePath: resolvedTarget.filePath,
+                        workspaceRoot: resolvedTarget.workspaceRoot,
+                        repositoryRoot: resolvedTarget.repositoryRoot,
                       },
                       event,
                     );

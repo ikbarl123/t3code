@@ -40,6 +40,7 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -238,34 +239,36 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 >
                   <div className="flex flex-col">
                     {repoOptions.length > 1 ? (
-                      <div className="flex flex-wrap items-center gap-1 px-3 py-1.5">
-                        {repoOptions.map((repo) => {
-                          const isSelected = repo.workspaceRoot === activeGitCwd;
-                          return (
-                            <button
+                      <div className="px-3 py-1.5">
+                        <ToggleGroup
+                          variant="segmented"
+                          value={activeGitCwd ? [activeGitCwd] : []}
+                          onValueChange={(next) => {
+                            const picked = next[0];
+                            if (typeof picked === "string") {
+                              setSelectedRepoCwd(picked);
+                            }
+                          }}
+                          className="flex-wrap"
+                        >
+                          {repoOptions.map((repo) => (
+                            <Toggle
                               key={repo.workspaceRoot}
-                              type="button"
-                              onClick={() => setSelectedRepoCwd(repo.workspaceRoot)}
-                              className={cn(
-                                "rounded px-2 py-0.5 text-2xs font-medium transition-colors",
-                                isSelected
-                                  ? "bg-accent text-accent-foreground"
-                                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                              )}
+                              value={repo.workspaceRoot}
+                              className="h-6 px-2 text-2xs"
                               title={repo.workspaceRoot}
                             >
                               {repo.label}
-                            </button>
-                          );
-                        })}
+                            </Toggle>
+                          ))}
+                        </ToggleGroup>
                       </div>
                     ) : null}
-                    {show.branch ? (
+                    {show.branch && activeGitCwd === props.gitCwd ? (
                       <BranchToolbar
                         layout="panel"
                         panelSection="branch"
                         {...branchToolbarProps}
-                        worktreePath={activeGitCwd !== props.gitCwd ? activeGitCwd : props.worktreePath}
                       />
                     ) : null}
                     {show.git && activeGitCwd ? (

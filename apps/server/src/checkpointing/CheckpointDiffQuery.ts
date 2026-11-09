@@ -260,21 +260,27 @@ export const make = Effect.gen(function* () {
         const snapshot = (toCheckpoint.repoSnapshots ?? []).find(
           (candidate) => candidate.workspaceRoot === requestedWorkspaceRoot,
         );
-        if (snapshot !== undefined && snapshot.status === "ready") {
-          const { repoDiff, truncated } = yield* computeCwdDiff(
-            snapshot.workspaceRoot,
-            CHECKPOINT_DIFF_MAX_OUTPUT_BYTES,
-          );
-          diff = truncated
-            ? new TextDecoder().decode(
-                Buffer.from(repoDiff).subarray(
-                  0,
-                  CHECKPOINT_DIFF_MAX_OUTPUT_BYTES - Buffer.byteLength(DIFF_TRUNCATED_MARKER),
-                ),
-                { stream: true },
-              ) + DIFF_TRUNCATED_MARKER
-            : repoDiff;
+        if (snapshot === undefined || snapshot.status !== "ready") {
+          return yield* new CheckpointRefUnavailableError({
+            operation,
+            threadId: input.threadId,
+            turnCount: input.toTurnCount,
+            checkpoint: "to",
+          });
         }
+        const { repoDiff, truncated } = yield* computeCwdDiff(
+          snapshot.workspaceRoot,
+          CHECKPOINT_DIFF_MAX_OUTPUT_BYTES,
+        );
+        diff = truncated
+          ? new TextDecoder().decode(
+              Buffer.from(repoDiff).subarray(
+                0,
+                CHECKPOINT_DIFF_MAX_OUTPUT_BYTES - Buffer.byteLength(DIFF_TRUNCATED_MARKER),
+              ),
+              { stream: true },
+            ) + DIFF_TRUNCATED_MARKER
+          : repoDiff;
       } else {
         const primary = yield* computeCwdDiff(toScope.cwd, CHECKPOINT_DIFF_MAX_OUTPUT_BYTES);
         diff = primary.repoDiff;

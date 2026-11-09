@@ -463,13 +463,27 @@ function ProjectDetail({
       trimmedPath.split(/[\\/]/).filter(Boolean).pop() ||
       "repo";
     const id = `${inferredLabel.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}-${Date.now().toString(36)}`;
-    const nextLinkedWorkspaces: ReadonlyArray<ProjectLinkedWorkspace> = [
-      ...currentLinkedWorkspaces,
-      { id, label: inferredLabel, workspaceRoot: trimmedPath },
-    ];
+    const newEntry: ProjectLinkedWorkspace = {
+      id,
+      label: inferredLabel,
+      workspaceRoot: trimmedPath,
+    };
+    const sameEnvironmentMembers = group.memberProjects.filter(
+      (member) => member.environmentId === representative.environmentId,
+    );
     setIsSavingLinkedRepos(true);
-    const result = await updateAllMembers(
-      { linkedWorkspaces: nextLinkedWorkspaces },
+    const result = await updateProjectGroup(
+      sameEnvironmentMembers,
+      (member) => {
+        const existing = member.linkedWorkspaces ?? [];
+        if (
+          member.workspaceRoot === trimmedPath ||
+          existing.some((item) => item.workspaceRoot === trimmedPath)
+        ) {
+          return { linkedWorkspaces: existing };
+        }
+        return { linkedWorkspaces: [...existing, newEntry] };
+      },
       "Failed to link repository",
     );
     setIsSavingLinkedRepos(false);
@@ -480,12 +494,17 @@ function ProjectDetail({
   };
 
   const handleRemoveLinkedRepo = async (workspaceRoot: string) => {
-    const nextLinkedWorkspaces = currentLinkedWorkspaces.filter(
-      (item) => item.workspaceRoot !== workspaceRoot,
+    const sameEnvironmentMembers = group.memberProjects.filter(
+      (member) => member.environmentId === representative.environmentId,
     );
     setIsSavingLinkedRepos(true);
-    await updateAllMembers(
-      { linkedWorkspaces: nextLinkedWorkspaces },
+    await updateProjectGroup(
+      sameEnvironmentMembers,
+      (member) => ({
+        linkedWorkspaces: (member.linkedWorkspaces ?? []).filter(
+          (item) => item.workspaceRoot !== workspaceRoot,
+        ),
+      }),
       "Failed to remove linked repository",
     );
     setIsSavingLinkedRepos(false);

@@ -25,6 +25,20 @@ function layer(input: {
   readonly linkedWorkspaceRoots?: ReadonlyArray<string>;
   readonly threadWorktrees?: ReadonlyArray<{ worktreePath: string; deleted?: boolean }>;
   readonly gitWorktrees?: ReadonlyArray<string>;
+  readonly branchCommitsByCwd?: Readonly<
+    Record<
+      string,
+      {
+        readonly commits: ReadonlyArray<{
+          readonly sha: string;
+          readonly subject: string;
+          readonly author: string;
+          readonly committedAt: string;
+        }>;
+        readonly truncated: boolean;
+      }
+    >
+  >;
 }) {
   const projectRoots = input.projectRoots ?? [];
   return ReviewService.layer.pipe(
@@ -87,6 +101,20 @@ function layer(input: {
         detect: (request) =>
           Effect.sync(() => {
             input.detectCalls?.push({ cwd: request.cwd });
+            if (input.branchCommitsByCwd && request.cwd in input.branchCommitsByCwd) {
+              return {
+                kind: "git" as const,
+                repository: {
+                  kind: "git" as const,
+                  rootPath: request.cwd,
+                  commonDirPath: `${request.cwd}/.git`,
+                  headRef: "main",
+                  headCommitSha: "0000000",
+                  hasWorkingTreeChanges: false,
+                },
+                driver: {} as never,
+              };
+            }
             return null;
           }),
       }),
@@ -94,6 +122,13 @@ function layer(input: {
     Layer.provide(
       Layer.mock(GitVcsDriver.GitVcsDriver)({
         listWorktreePaths: () => Effect.succeed([...(input.gitWorktrees ?? [])]),
+        getReviewBranchCommits: (req) =>
+          Effect.succeed(
+            input.branchCommitsByCwd?.[req.cwd] ?? {
+              commits: [],
+              truncated: false,
+            },
+          ),
       }),
     ),
     Layer.provide(
@@ -295,6 +330,66 @@ describe("ReviewService", () => {
         ),
       );
       assert.strictEqual(result.cwd, linkedServiceRoot);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("aggregates getBranchCommits across cwds newest-first and tolerates rejected cwds", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const docsRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-docs-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const serviceARoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-svc-a-" });
+      const unauthorizedRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
+
+      const result = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getBranchCommits({
+          cwd: docsRoot,
+          cwds: [docsRoot, serviceARoot, docsRoot, unauthorizedRoot],
+        });
+      }).pipe(
+        Effect.provide(
+          layer({
+            workspaceRoot: docsRoot,
+            baseDir,
+            projectRoots: [docsRoot],
+            linkedWorkspaceRoots: [serviceARoot],
+            branchCommitsByCwd: {
+              [docsRoot]: {
+                commits: [
+                  {
+                    sha: "1111111",
+                    subject: "docs: update architecture",
+                    author: "Alice",
+                    committedAt: "2026-01-01T10:00:00.000Z",
+                  },
+                ],
+                truncated: false,
+              },
+              [serviceARoot]: {
+                commits: [
+                  {
+                    sha: "2222222",
+                    subject: "feat: add endpoint",
+                    author: "Bob",
+                    committedAt: "2026-01-01T12:00:00.000Z",
+                  },
+                ],
+                truncated: true,
+              },
+            },
+          }),
+        ),
+      );
+
+      assert.strictEqual(result.truncated, true);
+      assert.strictEqual(result.commits.length, 2);
+      assert.strictEqual(result.commits[0]?.sha, "2222222");
+      assert.strictEqual(result.commits[0]?.cwd, serviceARoot);
+      assert.strictEqual(result.commits[0]?.repoLabel, serviceARoot.split("/").pop());
+      assert.strictEqual(result.commits[1]?.sha, "1111111");
+      assert.strictEqual(result.commits[1]?.cwd, docsRoot);
+      assert.strictEqual(result.commits[1]?.repoLabel, docsRoot.split("/").pop());
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

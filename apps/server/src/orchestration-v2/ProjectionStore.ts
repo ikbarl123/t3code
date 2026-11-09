@@ -52,6 +52,7 @@ import {
   idleCompactionOf,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
+  OrchestrationV2RepoCheckpointSnapshot,
   OrchestrationV2CheckpointScopeJson as OrchestrationV2CheckpointScopeJsonSchema,
   OrchestrationV2ContextHandoffJson as OrchestrationV2ContextHandoffJsonSchema,
   OrchestrationV2ContextTransferJson as OrchestrationV2ContextTransferJsonSchema,
@@ -76,7 +77,7 @@ import {
   TurnItemId,
   NodeId,
   ProjectId,
-  type ProjectLinkedWorkspace,
+  ProjectLinkedWorkspace,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import {
@@ -256,6 +257,12 @@ const ProjectionCheckpointContext = Schema.Struct({
 });
 export type ProjectionCheckpointContext = typeof ProjectionCheckpointContext.Type;
 const decodeCheckpointContext = Schema.decodeUnknownEffect(ProjectionCheckpointContext);
+const decodeRepoSnapshotsJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(OrchestrationV2RepoCheckpointSnapshot)),
+);
+const decodeLinkedWorkspacesJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(ProjectLinkedWorkspace)),
+);
 
 export interface ProjectionCheckpointCaptureContext {
   readonly run: OrchestrationV2Run | undefined;
@@ -5301,17 +5308,18 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ORDER BY scope_id ASC, ordinal_within_scope ASC
             `,
             ]);
-            const parsedCheckpoints = checkpoints.map((row: Record<string, unknown>) => {
-              const { repoSnapshotsJson, ...rest } = row;
-              if (typeof repoSnapshotsJson === "string" && repoSnapshotsJson.length > 0) {
-                try {
-                  return { ...rest, repoSnapshots: JSON.parse(repoSnapshotsJson) };
-                } catch {
+            const parsedCheckpoints = yield* Effect.forEach(
+              checkpoints as ReadonlyArray<Record<string, unknown>>,
+              (row) =>
+                Effect.gen(function* () {
+                  const { repoSnapshotsJson, ...rest } = row;
+                  if (typeof repoSnapshotsJson === "string" && repoSnapshotsJson.length > 0) {
+                    const repoSnapshots = yield* decodeRepoSnapshotsJson(repoSnapshotsJson);
+                    return { ...rest, repoSnapshots };
+                  }
                   return rest;
-                }
-              }
-              return rest;
-            });
+                }),
+            );
             return yield* decodeCheckpointContext({
               runs,
               checkpointScopes,
@@ -5384,16 +5392,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   : yield* decodeProviderThreadPayload(providerRows[0].payload_json),
               readyCheckpointOrdinals: readyRows.map(({ ordinal }) => ordinal),
               sideChat: threadRows[0].side_chat === 1,
-              linkedWorkspaces: (() => {
-                const raw = threadRows[0].linked_workspaces_json;
-                if (!raw) return undefined;
-                try {
-                  const parsed = JSON.parse(raw);
-                  return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined;
-                } catch {
-                  return undefined;
-                }
-              })(),
+              linkedWorkspaces:
+                threadRows[0].linked_workspaces_json === null
+                  ? undefined
+                  : yield* decodeLinkedWorkspacesJson(threadRows[0].linked_workspaces_json).pipe(
+                      Effect.map((items) => (items.length > 0 ? items : undefined)),
+                    ),
             };
           }),
         )

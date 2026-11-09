@@ -17,6 +17,7 @@ import {
   type OrchestrationV2RunAttempt,
   type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
+  type ProjectLinkedWorkspace,
   type ProviderSessionId,
   type ProviderThreadId,
   type ProviderTurnId,
@@ -561,6 +562,7 @@ export interface RunExecutionServiceV2StartRootRunInput {
   readonly run: OrchestrationV2Run;
   readonly rootNode: OrchestrationV2ExecutionNode;
   readonly checkpointScope: OrchestrationV2CheckpointScope;
+  readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
   readonly providerThread: OrchestrationV2ProviderThread;
   readonly attempt: OrchestrationV2RunAttempt;
   readonly attemptId: RunAttemptId;
@@ -937,6 +939,7 @@ export const layer: Layer.Layer<
               : checkpointService.captureBaseline({
                   scope: input.checkpointScope,
                   ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+                  ...(input.linkedWorkspaces ? { linkedWorkspaces: input.linkedWorkspaces } : {}),
                 })
           ).pipe(
             Effect.catchCauseIf(

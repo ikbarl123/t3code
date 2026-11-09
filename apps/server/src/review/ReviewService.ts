@@ -93,21 +93,22 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  const getSingleCwdBranchCommits = (input: ReviewBranchCommitsInput) =>
-    Effect.gen(function* () {
-      yield* assertWorkspaceBoundCwd("ReviewService.getBranchCommits", input.cwd);
+  const getSingleCwdBranchCommits = Effect.fn("ReviewService.getSingleCwdBranchCommits")(function* (
+    input: ReviewBranchCommitsInput,
+  ) {
+    yield* assertWorkspaceBoundCwd("ReviewService.getBranchCommits", input.cwd);
 
-      const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
-      if (!handle) return { commits: [], truncated: false };
-      if (handle.kind !== "git") {
-        return yield* new VcsUnsupportedOperationError({
-          operation: "ReviewService.getBranchCommits",
-          kind: handle.kind,
-          detail: "Review commit lists require a Git repository.",
-        });
-      }
-      return yield* git.getReviewBranchCommits(input);
-    });
+    const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
+    if (!handle) return { commits: [], truncated: false };
+    if (handle.kind !== "git") {
+      return yield* new VcsUnsupportedOperationError({
+        operation: "ReviewService.getBranchCommits",
+        kind: handle.kind,
+        detail: "Review commit lists require a Git repository.",
+      });
+    }
+    return yield* git.getReviewBranchCommits(input);
+  });
 
   const getBranchCommits: ReviewService["Service"]["getBranchCommits"] = Effect.fn(
     "ReviewService.getBranchCommits",

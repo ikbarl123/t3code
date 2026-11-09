@@ -613,6 +613,54 @@ it.layer(layerTest)("ProjectService", (it) => {
       assert.equal((yield* service.create(input)).id, projectId);
     }),
   );
+
+  it.effect("rejects linkedWorkspaces with duplicate normalized roots, ids, or labels", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const projectId = ProjectId.make("project:linked-validation");
+
+      const duplicatePrimary = yield* service
+        .create({
+          commandId: CommandId.make("command:linked-validation:primary"),
+          projectId,
+          title: "Docs",
+          workspaceRoot: "/work/docs",
+          linkedWorkspaces: [
+            { id: "svc-a", label: "Service A", workspaceRoot: "/work/docs/" },
+          ],
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(duplicatePrimary, ProjectService.ProjectInvalidError);
+
+      const duplicateLinkedRoot = yield* service
+        .create({
+          commandId: CommandId.make("command:linked-validation:root"),
+          projectId,
+          title: "Docs",
+          workspaceRoot: "/work/docs",
+          linkedWorkspaces: [
+            { id: "svc-a", label: "Service A", workspaceRoot: "/work/svc-a" },
+            { id: "svc-b", label: "Service B", workspaceRoot: "/work/svc-a/" },
+          ],
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(duplicateLinkedRoot, ProjectService.ProjectInvalidError);
+
+      const duplicateLabel = yield* service
+        .create({
+          commandId: CommandId.make("command:linked-validation:label"),
+          projectId,
+          title: "Docs",
+          workspaceRoot: "/work/docs",
+          linkedWorkspaces: [
+            { id: "svc-a", label: "Service A", workspaceRoot: "/work/svc-a" },
+            { id: "svc-b", label: "service a", workspaceRoot: "/work/svc-b" },
+          ],
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(duplicateLabel, ProjectService.ProjectInvalidError);
+    }),
+  );
 });
 
 it.effect("keeps project snapshots available when optional metadata enrichment fails", () =>
