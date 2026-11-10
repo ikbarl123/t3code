@@ -45,6 +45,16 @@ describe("openDiffFilePrimaryAction", () => {
     ).toBe("frontend/Dockerfile");
   });
 
+  it("resolves worktree-relative paths when worktree is the active repository root", () => {
+    expect(
+      resolveDiffPathForWorkspace({
+        filePath: "src/index.ts",
+        workspaceRoot: "/repo/.worktrees/feature",
+        repositoryRoot: "/repo/.worktrees/feature",
+      }),
+    ).toBe("src/index.ts");
+  });
+
   it("handles Windows roots and mixed diff separators", () => {
     expect(
       resolveDiffPathForWorkspace({

@@ -451,6 +451,17 @@ export const make = Effect.gen(function* () {
         primaryWorkspaceRoot: workspaceRoot,
         linkedWorkspaces: input.linkedWorkspaces,
       });
+      if (
+        input.linkedWorkspaces === undefined &&
+        workspaceRoot !== previousRoot &&
+        existing.value.linkedWorkspaces !== undefined
+      ) {
+        yield* normalizeLinkedWorkspaces({
+          projectId: input.projectId,
+          primaryWorkspaceRoot: workspaceRoot,
+          linkedWorkspaces: existing.value.linkedWorkspaces,
+        });
+      }
       yield* commit({
         type: "project.meta.update",
         commandId: input.commandId,

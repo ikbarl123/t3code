@@ -419,8 +419,10 @@ export default function DiffPanel({
     ? projectRepos.find((repo) => repo.workspaceRoot === selectedCommitCwd)
     : undefined;
   const activeRepositoryRoot =
-    selectedCommitCwd === primaryCwd && !activeThread?.worktreePath
-      ? activeProject?.repositoryIdentity?.rootPath
+    selectedCommitCwd === primaryCwd
+      ? activeThread?.worktreePath
+        ? primaryCwd
+        : activeProject?.repositoryIdentity?.rootPath
       : (selectedOwningRepo && "repositoryIdentity" in selectedOwningRepo
           ? selectedOwningRepo.repositoryIdentity?.rootPath
           : undefined) ?? selectedCommitCwd;

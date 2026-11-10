@@ -661,6 +661,45 @@ it.layer(layerTest)("ProjectService", (it) => {
       assert.instanceOf(duplicateLabel, ProjectService.ProjectInvalidError);
     }),
   );
+
+  it.effect(
+    "validates changed workspaceRoot against retained linked workspaces when linkedWorkspaces is omitted",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* ProjectService.ProjectService;
+        const projectId = ProjectId.make("project:linked-update-validation");
+
+        yield* service.create({
+          commandId: CommandId.make("command:linked-update:create"),
+          projectId,
+          title: "Docs",
+          workspaceRoot: "/work/docs",
+          linkedWorkspaces: [
+            { id: "svc-a", label: "Service A", workspaceRoot: "/work/svc-a" },
+          ],
+        });
+
+        const duplicateOnUpdate = yield* service
+          .update({
+            commandId: CommandId.make("command:linked-update:duplicate"),
+            projectId,
+            workspaceRoot: "/work/svc-a",
+          })
+          .pipe(Effect.flip);
+        assert.instanceOf(duplicateOnUpdate, ProjectService.ProjectInvalidError);
+
+        const updated = yield* service.update({
+          commandId: CommandId.make("command:linked-update:valid"),
+          projectId,
+          workspaceRoot: "/work/docs-new",
+        });
+        assert.equal(updated.workspaceRoot, "/work/docs-new");
+        assert.deepEqual(
+          updated.linkedWorkspaces?.map((w) => w.id),
+          ["svc-a"],
+        );
+      }),
+  );
 });
 
 it.effect("keeps project snapshots available when optional metadata enrichment fails", () =>
