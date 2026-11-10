@@ -374,6 +374,14 @@ describe("ReviewService", () => {
                     author: "Bob",
                     committedAt: "2026-01-01T12:00:00.000Z",
                   },
+                  {
+                    sha: "3333333",
+                    subject: "feat: timezone offset test",
+                    author: "Charlie",
+                    // 15:00+04:00 is 11:00:00 UTC, which is older than Bob (12:00 UTC) but newer than Alice (10:00 UTC).
+                    // Lexicographically "2026-01-01T15..." would sort ahead of Bob, but timestamp sorting places Bob first.
+                    committedAt: "2026-01-01T15:00:00+04:00",
+                  },
                 ],
                 truncated: true,
               },
@@ -383,13 +391,43 @@ describe("ReviewService", () => {
       );
 
       assert.strictEqual(result.truncated, true);
-      assert.strictEqual(result.commits.length, 2);
+      assert.strictEqual(result.commits.length, 3);
       assert.strictEqual(result.commits[0]?.sha, "2222222");
       assert.strictEqual(result.commits[0]?.cwd, serviceARoot);
-      assert.strictEqual(result.commits[0]?.repoLabel, serviceARoot.split("/").pop());
-      assert.strictEqual(result.commits[1]?.sha, "1111111");
-      assert.strictEqual(result.commits[1]?.cwd, docsRoot);
-      assert.strictEqual(result.commits[1]?.repoLabel, docsRoot.split("/").pop());
+      assert.strictEqual(result.commits[1]?.sha, "3333333");
+      assert.strictEqual(result.commits[1]?.cwd, serviceARoot);
+      assert.strictEqual(result.commits[2]?.sha, "1111111");
+      assert.strictEqual(result.commits[2]?.cwd, docsRoot);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("propagates failure when primary cwd lookup fails", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const docsRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-docs-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const serviceARoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-svc-a-" });
+      const unauthorizedRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
+
+      const error = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getBranchCommits({
+          cwd: unauthorizedRoot,
+          cwds: [unauthorizedRoot, serviceARoot],
+        });
+      }).pipe(
+        Effect.provide(
+          layer({
+            workspaceRoot: docsRoot,
+            baseDir,
+            projectRoots: [docsRoot],
+            linkedWorkspaceRoots: [serviceARoot],
+          }),
+        ),
+        Effect.flip,
+      );
+
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

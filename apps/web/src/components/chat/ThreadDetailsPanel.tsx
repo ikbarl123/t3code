@@ -109,7 +109,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     props.gitCwd;
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,
-    props.activeProjectScripts && visible.scripts ? activeGitCwd : null,
+    props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
   const branchToolbarProps = {
@@ -255,7 +255,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                             <Toggle
                               key={repo.workspaceRoot}
                               value={repo.workspaceRoot}
-                              className="h-6 px-2 text-2xs"
                               title={repo.workspaceRoot}
                             >
                               {repo.label}
@@ -278,6 +277,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         showChanges={visible.changes}
                         gitCwd={activeGitCwd}
                         activeThreadRef={activeThreadRef}
+                        syncThreadBranch={activeGitCwd === props.gitCwd}
                         {...(props.draftId ? { draftId: props.draftId } : {})}
                         {...(props.onOpenChanges ? { onOpenChanges: props.onOpenChanges } : {})}
                       />

@@ -270,7 +270,14 @@ export default function DiffPanel({
     : [];
   const hasMultipleRepos = projectRepos.length > 1;
   const [selectedRepoCwd, setSelectedRepoCwd] = useState<string>("all");
-  const resolvedSelectedRepo = projectRepos.find((repo) => repo.workspaceRoot === selectedRepoCwd);
+  const effectiveSelectedRepoCwd =
+    selectedRepoCwd !== "all" && projectRepos.some((repo) => repo.workspaceRoot === selectedRepoCwd)
+      ? selectedRepoCwd
+      : "all";
+  const resolvedSelectedRepo = projectRepos.find(
+    (repo) => repo.workspaceRoot === effectiveSelectedRepoCwd,
+  );
+
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
   );
@@ -395,10 +402,13 @@ export default function DiffPanel({
       : null,
   );
   const branchCommits = openCommitMenu ?? branchCommitsQuery.data;
-  const selectedCommitCwd =
+  const selectedCommit =
     selectedCommitSha !== null
-      ? (branchCommits?.commits.find((c) => c.sha === selectedCommitSha)?.cwd ?? activeCwd)
-      : activeCwd;
+      ? branchCommits?.commits.find((c) => c.sha === selectedCommitSha)
+      : undefined;
+  const awaitingCommitRepo =
+    selectedCommitSha !== null && hasMultipleRepos && !resolvedSelectedRepo && !selectedCommit;
+  const selectedCommitCwd = awaitingCommitRepo ? undefined : (selectedCommit?.cwd ?? activeCwd);
   const activeRepositoryRoot =
     selectedCommitCwd === primaryCwd && !activeThread?.worktreePath
       ? activeProject?.repositoryIdentity?.rootPath
@@ -484,9 +494,17 @@ export default function DiffPanel({
       ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
       : selectedGitScopeLabel;
   const headerCommitSha = selectedRunId === null ? selectedCommitSha : null;
+  const selectedCommitOwningRepo =
+    selectedCommitSha !== null && selectedCommitCwd
+      ? projectRepos.find((repo) => repo.workspaceRoot === selectedCommitCwd)
+      : undefined;
+  const selectedCommitRepoIdentity =
+    selectedCommitOwningRepo && "repositoryIdentity" in selectedCommitOwningRepo
+      ? selectedCommitOwningRepo.repositoryIdentity
+      : activeProject?.repositoryIdentity;
   const selectedCommitUrl =
     headerCommitSha !== null
-      ? projectCommitUrl(activeProject?.repositoryIdentity, headerCommitSha)
+      ? projectCommitUrl(selectedCommitRepoIdentity, headerCommitSha)
       : null;
   const openLink = useOpenLink(routeThreadRef);
   // A SHA link goes to the code host; it must not route back into this pane's commit selection.
@@ -761,12 +779,15 @@ export default function DiffPanel({
     if (match) {
       const repoLabel = match[1]!;
       const innerPath = match[2]!;
-      const matchedRepo = projectRepos.find((repo) => repo.label === repoLabel);
+      const matchedRepo = linkedWorkspaces.find((repo) => repo.label === repoLabel);
       if (matchedRepo) {
         return {
           filePath: innerPath,
           workspaceRoot: matchedRepo.workspaceRoot,
-          repositoryRoot: matchedRepo.workspaceRoot,
+          repositoryRoot:
+            ("repositoryIdentity" in matchedRepo
+              ? matchedRepo.repositoryIdentity?.rootPath
+              : undefined) ?? matchedRepo.workspaceRoot,
         };
       }
     }
@@ -885,8 +906,13 @@ export default function DiffPanel({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuRadioGroup
-                value={resolvedSelectedRepo?.workspaceRoot ?? "all"}
-                onValueChange={(value) => setSelectedRepoCwd(value)}
+                value={effectiveSelectedRepoCwd}
+                onValueChange={(value) => {
+                  setSelectedRepoCwd(value);
+                  if (diffSelection.kind === "commit") {
+                    selectGitScope("branch");
+                  }
+                }}
               >
                 <DropdownMenuRadioItem value="all" closeOnClick>
                   <span>All repos ({projectRepos.length})</span>
@@ -994,10 +1020,14 @@ export default function DiffPanel({
                   onValueChange={selectScopeValue}
                 >
                   {branchCommits?.commits.map((commit) => {
-                    const commitUrl = projectCommitUrl(
-                      activeProject?.repositoryIdentity,
-                      commit.sha,
-                    );
+                    const commitOwningRepo = commit.cwd
+                      ? projectRepos.find((repo) => repo.workspaceRoot === commit.cwd)
+                      : undefined;
+                    const commitRepoIdentity =
+                      commitOwningRepo && "repositoryIdentity" in commitOwningRepo
+                        ? commitOwningRepo.repositoryIdentity
+                        : activeProject?.repositoryIdentity;
+                    const commitUrl = projectCommitUrl(commitRepoIdentity, commit.sha);
                     return (
                       <div
                         key={commit.sha}

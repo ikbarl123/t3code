@@ -7,6 +7,7 @@ import {
   ThreadId,
   VcsProcessExitError,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -38,6 +39,8 @@ import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 
 export const ROLLBACK_FAILED_MESSAGE =
   "The provider could not roll back this conversation. Try again; if it keeps failing, check the provider and server logs.";
+export const FILE_RESTORE_FAILED_MESSAGE =
+  "The conversation rolled back, but one or more workspace files could not be restored. Check the server logs or Git status.";
 
 export class CheckpointRollbackExecutionError extends Schema.TaggedError<CheckpointRollbackExecutionError>()(
   "CheckpointRollbackExecutionError",
@@ -48,6 +51,7 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
       "provider-turn-unavailable",
       "unexpected-failure",
       "shared-workspace",
+      "file-restore-failed",
     ]),
     threadId: ThreadId,
     providerThreadId: ProviderThreadId,
@@ -65,6 +69,8 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
         return `Provider turn for rollback target ${this.checkpointId} is unavailable on provider thread ${this.providerThreadId}.`;
       case "shared-workspace":
         return SHARED_WORKSPACE_RESTORE_MESSAGE;
+      case "file-restore-failed":
+        return FILE_RESTORE_FAILED_MESSAGE;
       case "unexpected-failure":
         return ROLLBACK_FAILED_MESSAGE;
     }
@@ -83,6 +89,7 @@ const isRuntimePolicyAboveCeilingError = Schema.is(RuntimePolicyAboveCeilingErro
  */
 export function rollbackFailureClientMessage(error: CheckpointRollbackExecutionError): string {
   if (isRuntimePolicyAboveCeilingError(error.cause)) return error.cause.message;
+  if (error.reason === "file-restore-failed") return FILE_RESTORE_FAILED_MESSAGE;
   const restoreCause = isCheckpointRestoreError(error.cause) ? error.cause.cause : undefined;
   return isVcsProcessExitError(restoreCause) && restoreCause.detail === GIT_INDEX_LOCKED_DETAIL
     ? GIT_INDEX_LOCKED_DETAIL
@@ -289,11 +296,30 @@ export const layer: Layer.Layer<
               target: rollbackTarget,
               providerThreadTurns,
             });
+      let restoreExit: Effect.Exit<
+        { readonly skippedLinkedRoots: ReadonlyArray<string> },
+        unknown
+      > | null = null;
       if (input.restoreFiles !== false) {
-        yield* checkpoints.restore({ scope, checkpoint, staleCheckpoints });
+        restoreExit = yield* Effect.exit(
+          checkpoints.restore({ scope, checkpoint, staleCheckpoints }),
+        );
       }
-      if (staleCheckpoints.length > 0) {
-        yield* checkpoints.deleteStaleRefs({ scope, checkpoints: staleCheckpoints });
+      const skippedLinkedRoots =
+        restoreExit !== null && restoreExit._tag === "Success"
+          ? (restoreExit.value?.skippedLinkedRoots ?? [])
+          : [];
+      if (
+        staleCheckpoints.length > 0 &&
+        (restoreExit === null || restoreExit._tag === "Success")
+      ) {
+        yield* checkpoints
+          .deleteStaleRefs({
+            scope,
+            checkpoints: staleCheckpoints,
+            ...(skippedLinkedRoots.length > 0 ? { preserveRoots: skippedLinkedRoots } : {}),
+          })
+          .pipe(Effect.ignore);
       }
 
       // Lock against full-row thread writes that could restore the old native session after rollback.
@@ -368,6 +394,29 @@ export const layer: Layer.Layer<
           yield* eventSink.write({ events });
         }),
       );
+
+      if (restoreExit !== null && restoreExit._tag === "Failure") {
+        return yield* new CheckpointRollbackExecutionError({
+          reason: "file-restore-failed",
+          threadId: input.threadId,
+          providerThreadId: input.providerThreadId,
+          checkpointId: input.checkpointId,
+          cause: Cause.squash(restoreExit.cause),
+        });
+      }
+      if (skippedLinkedRoots.length > 0) {
+        return yield* new CheckpointRollbackExecutionError({
+          reason: "file-restore-failed",
+          threadId: input.threadId,
+          providerThreadId: input.providerThreadId,
+          checkpointId: input.checkpointId,
+          cause: new CheckpointRestoreError({
+            scopeId: input.scopeId,
+            checkpointId: input.checkpointId,
+            cause: `Linked repositories (${skippedLinkedRoots.join(", ")}) were skipped during rollback due to detected changes or unverified drift.`,
+          }),
+        });
+      }
     });
 
     return CheckpointRollbackServiceV2.of({

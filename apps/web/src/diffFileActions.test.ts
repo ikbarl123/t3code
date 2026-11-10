@@ -30,7 +30,7 @@ describe("openDiffFilePrimaryAction", () => {
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
     ).toMatchObject({
       isOpen: true,
-      activeSurfaceId: "file:Dockerfile",
+      activeSurfaceId: "file:/repo/frontend:Dockerfile",
     });
     expect(openInEditor).not.toHaveBeenCalled();
   });

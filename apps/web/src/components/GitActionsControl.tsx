@@ -121,6 +121,7 @@ interface GitActionsControlProps {
   showActions?: boolean;
   showChanges?: boolean;
   onOpenChanges?: () => void;
+  syncThreadBranch?: boolean;
 }
 
 interface PendingDefaultBranchAction {
@@ -932,6 +933,7 @@ export default function GitActionsControl({
   showActions = true,
   showChanges = true,
   onOpenChanges,
+  syncThreadBranch = true,
 }: GitActionsControlProps) {
   const panelAnchorRef = useRef<HTMLDivElement | null>(null);
   const updateThreadMetadata = useAtomCommand(
@@ -982,7 +984,7 @@ export default function GitActionsControl({
     inlineSuccess?.scopeKey === successScopeKey && !inlineSuccessExpired ? inlineSuccess : null;
 
   const persistThreadBranchSync = (branch: string | null, manualSelection = false) => {
-    if (!activeThreadRef) {
+    if (!syncThreadBranch || !activeThreadRef) {
       return;
     }
 
@@ -1079,7 +1081,7 @@ export default function GitActionsControl({
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- persists the draft thread branch when the live git status subscription reports a different branch
   useEffect(() => {
-    if (isGitActionRunning || isSelectingWorktreeBase || activeServerThread) {
+    if (!syncThreadBranch || isGitActionRunning || isSelectingWorktreeBase || activeServerThread) {
       return;
     }
 
@@ -1098,6 +1100,7 @@ export default function GitActionsControl({
     gitStatusForActions,
     isGitActionRunning,
     isSelectingWorktreeBase,
+    syncThreadBranch,
   ]);
 
   const isDefaultRef = gitStatusForActions?.isDefaultRef ?? false;

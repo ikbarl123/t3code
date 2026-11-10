@@ -57,6 +57,7 @@ export type RightPanelSurface =
       id: `file:${string}` | `attachment:${string}`;
       kind: "file";
       relativePath: string;
+      workspaceRoot?: string;
       revealLine: number | null;
       revealRequestId: number;
       attachment?: ChatFileAttachment;
@@ -129,7 +130,7 @@ interface RightPanelStoreState {
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
-  openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
+  openFile: (ref: ScopedThreadRef, relativePath: string, line?: number, workspaceRoot?: string) => void;
   /** Moves in place; "" opens the root explorer. folderTrail keeps the return path; keepSource opens beside the source. */
   navigateFolder: (
     ref: ScopedThreadRef,
@@ -231,10 +232,12 @@ const fileSurface = (
   relativePath: string,
   revealLine: number | null,
   revealRequestId: number,
+  workspaceRoot?: string,
 ): RightPanelSurface => ({
-  id: `file:${relativePath}`,
+  id: workspaceRoot ? `file:${workspaceRoot}:${relativePath}` : `file:${relativePath}`,
   kind: "file",
   relativePath,
+  ...(workspaceRoot ? { workspaceRoot } : {}),
   revealLine,
   revealRequestId,
 });
@@ -781,7 +784,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ),
           }));
         }),
-      openFile: (ref, requestedPath, line) =>
+      openFile: (ref, requestedPath, line, workspaceRoot) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             if (requestedPath === ".") {
@@ -794,7 +797,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             const withoutStandaloneExplorer = current.surfaces.filter(
               (surface) => surface.kind !== "files",
             );
-            const surfaceId = `file:${relativePath}` as const;
+            const surfaceId = workspaceRoot
+              ? (`file:${workspaceRoot}:${relativePath}` as const)
+              : (`file:${relativePath}` as const);
             const existing = withoutStandaloneExplorer.find(
               (surface): surface is Extract<RightPanelSurface, { kind: "file" }> =>
                 surface.id === surfaceId && surface.kind === "file",
@@ -803,6 +808,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               relativePath,
               normalizeRevealLine(line),
               (existing?.revealRequestId ?? 0) + 1,
+              workspaceRoot,
             );
             return {
               ...current,
@@ -821,12 +827,13 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           userAction(state, scopedThreadKey(ref), (current) => {
             const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
             if (index < 0) return current;
+            const source = current.surfaces[index]!;
+            const sourceRoot = source.kind === "file" ? source.workspaceRoot : undefined;
             const trail = folderTrail === relativePath ? {} : { folderTrail };
             const target: RightPanelSurface =
               relativePath === ""
                 ? { ...singletonSurface("files"), ...trail }
-                : { ...fileSurface(relativePath, null, 1), ...trail };
-            const source = current.surfaces[index]!;
+                : { ...fileSurface(relativePath, null, 1, sourceRoot), ...trail };
             const existing = current.surfaces.some(
               (surface, i) => i !== index && surface.id === target.id,
             );

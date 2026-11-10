@@ -135,13 +135,16 @@ it.effect(
                 Effect.sync(() => {
                   capturedCwds.push(cwd);
                 }),
-              diffCheckpoints: ({ cwd }) =>
+              diffCheckpoints: ({ cwd, toCheckpointRef }) =>
                 Effect.succeed(
-                  cwd === "/repo/docs"
-                    ? "2\t0\tdocs/plan.md\0"
-                    : "5\t1\tsrc/index.ts\0",
+                  toCheckpointRef.includes("-rollback-drift-check")
+                    ? ""
+                    : cwd === "/repo/docs"
+                      ? "2\t0\tdocs/plan.md\0"
+                      : "5\t1\tsrc/index.ts\0",
                 ),
               listAuthoredPaths: () => Effect.succeed(null),
+              deleteCheckpointRefs: () => Effect.void,
               restoreCheckpoint: ({ cwd }) =>
                 Effect.sync(() => {
                   restoredCwds.push(cwd);
@@ -174,8 +177,25 @@ it.effect(
         assert.strictEqual(checkpoint.repoSnapshots?.[0]?.workspaceRoot, "/repo/mercusuar");
         assert.strictEqual(checkpoint.repoSnapshots?.[0]?.label, "mercusuar");
 
-        yield* checkpoints.restore({ scope, checkpoint });
+        // When staleCheckpoints is absent, linked restore is skipped because drift cannot be checked
+        const restoreResult1 = yield* checkpoints.restore({ scope, checkpoint });
+        assert.deepEqual(restoredCwds, ["/repo/docs"]);
+        assert.deepEqual(restoreResult1.skippedLinkedRoots, ["/repo/mercusuar"]);
+
+        // When a subsequent checkpoint is in staleCheckpoints, drift is checked and linked restore succeeds
+        restoredCwds.length = 0;
+        const checkpoint2 = yield* checkpoints.capture({
+          scope,
+          ordinalWithinScope: 2,
+          runId: scope.runId!,
+          nodeId: scope.nodeId!,
+          appRunOrdinal: 2,
+          capturedAt: scope.createdAt,
+          linkedWorkspaces,
+        });
+        const restoreResult2 = yield* checkpoints.restore({ scope, checkpoint, staleCheckpoints: [checkpoint2] });
         assert.deepEqual(restoredCwds, ["/repo/docs", "/repo/mercusuar"]);
+        assert.deepEqual(restoreResult2.skippedLinkedRoots, []);
       }).pipe(Effect.provide(layerTest));
     }),
 );
@@ -299,6 +319,117 @@ it.effect(
           staleCheckpoints: [checkpoint2],
         });
         assert.deepEqual(restoredCwds, ["/repo/docs", "/repo/mercusuar"]);
+      }).pipe(Effect.provide(layerTest));
+    }),
+);
+
+it.effect(
+  "captures and restores linkedWorkspaces when the primary workspace is non-git / missing",
+  () =>
+    Effect.gen(function* () {
+      const scope: OrchestrationV2CheckpointScope = {
+        id: CheckpointScopeId.make("checkpoint-scope:non-git-primary"),
+        threadId: ThreadId.make("thread:non-git-primary"),
+        runId: RunId.make("run:non-git-primary:1"),
+        nodeId: NodeId.make("node:non-git-primary:1"),
+        parentScopeId: null,
+        providerThreadId: ProviderThreadId.make("provider-thread:non-git-primary"),
+        kind: "root_run",
+        ordinalWithinParent: 0,
+        advancesAppRunCount: true,
+        cwd: "/vault/docs",
+        createdAt: DateTime.makeUnsafe("2026-07-28T00:00:00.000Z"),
+      };
+      const linkedWorkspaces = [
+        {
+          id: "service",
+          label: "service",
+          workspaceRoot: "/repo/service",
+        },
+      ];
+      const capturedCwds: string[] = [];
+      const restoredCwds: string[] = [];
+
+      const layerTest = CheckpointService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            Layer.mock(CheckpointStore.CheckpointStore)({
+              isGitRepository: (cwd: string) => Effect.succeed(cwd !== "/vault/docs"),
+              hasCheckpointRef: () => Effect.succeed(true),
+              captureCheckpoint: ({ cwd }) =>
+                Effect.sync(() => {
+                  capturedCwds.push(cwd);
+                }),
+              diffCheckpoints: ({ toCheckpointRef }) =>
+                Effect.succeed(
+                  toCheckpointRef.includes("-rollback-drift-check") ? "" : "3\t0\tsrc/api.ts\0",
+                ),
+              listAuthoredPaths: () => Effect.succeed(null),
+              deleteCheckpointRefs: () => Effect.void,
+              restoreCheckpoint: ({ cwd }) =>
+                Effect.sync(() => {
+                  restoredCwds.push(cwd);
+                  return true;
+                }),
+            }),
+          ),
+        ),
+        Layer.provideMerge(NodeCrypto.layer),
+      );
+
+      yield* Effect.gen(function* () {
+        const checkpoints = yield* CheckpointService.CheckpointServiceV2;
+        const checkpoint = yield* checkpoints.capture({
+          scope,
+          ordinalWithinScope: 1,
+          runId: scope.runId!,
+          nodeId: scope.nodeId!,
+          appRunOrdinal: 1,
+          capturedAt: scope.createdAt,
+          linkedWorkspaces,
+        });
+
+        assert.strictEqual(checkpoint.status, "missing");
+        assert.deepEqual(
+          checkpoint.files.map((file) => file.path),
+          ["[service]/src/api.ts"],
+        );
+        assert.strictEqual(checkpoint.repoSnapshots?.length, 1);
+        assert.strictEqual(checkpoint.repoSnapshots?.[0]?.status, "ready");
+        assert.strictEqual(checkpoint.repoSnapshots?.[0]?.workspaceRoot, "/repo/service");
+
+        const checkpoint2 = yield* checkpoints.capture({
+          scope,
+          ordinalWithinScope: 2,
+          runId: scope.runId!,
+          nodeId: scope.nodeId!,
+          appRunOrdinal: 2,
+          capturedAt: scope.createdAt,
+          linkedWorkspaces,
+        });
+
+        yield* checkpoints.restore({
+          scope,
+          checkpoint,
+          staleCheckpoints: [checkpoint2],
+        });
+        assert.deepEqual(restoredCwds, ["/repo/service"]);
+
+        const forceMissingCheckpoint = yield* checkpoints.capture({
+          scope,
+          ordinalWithinScope: 3,
+          runId: scope.runId!,
+          nodeId: scope.nodeId!,
+          appRunOrdinal: 3,
+          capturedAt: scope.createdAt,
+          linkedWorkspaces,
+          forceMissing: true,
+        });
+        assert.strictEqual(forceMissingCheckpoint.status, "missing");
+        assert.deepEqual(forceMissingCheckpoint.files, []);
+        assert.strictEqual(forceMissingCheckpoint.repoSnapshots?.[0]?.status, "missing");
+        assert.deepEqual(forceMissingCheckpoint.repoSnapshots?.[0]?.files, []);
       }).pipe(Effect.provide(layerTest));
     }),
 );

@@ -126,7 +126,7 @@ export const make = Effect.gen(function* () {
       (cwd) =>
         getSingleCwdBranchCommits({
           cwd,
-          ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
+          ...(input.baseRef === undefined || cwd !== input.cwd ? {} : { baseRef: input.baseRef }),
         }).pipe(
           Effect.map((result) => ({
             cwd,
@@ -134,13 +134,23 @@ export const make = Effect.gen(function* () {
             commits: result.commits,
             truncated: result.truncated,
           })),
-          Effect.catch(() =>
-            Effect.succeed({
-              cwd,
-              repoLabel: path.basename(cwd) || cwd,
-              commits: [] as ReviewBranchCommitsResult["commits"],
-              truncated: false,
-            }),
+          Effect.catch((cause) =>
+            cwd === input.cwd
+              ? Effect.fail(cause)
+              : Effect.logWarning("review branch commits failed for repository", {
+                  cwd,
+                  cause:
+                    typeof cause === "object" && cause !== null && "_tag" in cause
+                      ? String((cause as { _tag: unknown })._tag)
+                      : String(cause),
+                }).pipe(
+                  Effect.as({
+                    cwd,
+                    repoLabel: path.basename(cwd) || cwd,
+                    commits: [] as ReviewBranchCommitsResult["commits"],
+                    truncated: false,
+                  }),
+                ),
           ),
         ),
       { concurrency: 4 },
@@ -154,7 +164,14 @@ export const make = Effect.gen(function* () {
           repoLabel: repo.repoLabel,
         })),
       )
-      .toSorted((left, right) => right.committedAt.localeCompare(left.committedAt));
+      .toSorted((left, right) => {
+        const rightTime = Date.parse(right.committedAt);
+        const leftTime = Date.parse(left.committedAt);
+        if (Number.isNaN(rightTime) || Number.isNaN(leftTime)) {
+          return right.committedAt.localeCompare(left.committedAt);
+        }
+        return rightTime - leftTime;
+      });
 
     return {
       commits: mergedCommits.slice(0, 100),

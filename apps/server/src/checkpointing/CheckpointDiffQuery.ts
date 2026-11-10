@@ -210,8 +210,8 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const computeCwdDiff = (cwd: string, maxBytes: number) =>
-        Effect.gen(function* () {
+      const computeCwdDiff = Effect.fn("CheckpointDiffQuery.computeCwdDiff")(
+        function* (cwd: string, maxBytes: number) {
           const comparison = {
             cwd,
             fromCheckpointRef,

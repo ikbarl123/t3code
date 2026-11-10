@@ -23,7 +23,7 @@ export type ReviewDiffPreviewInput = typeof ReviewDiffPreviewInput.Type;
 
 export const ReviewBranchCommitsInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
-  cwds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  cwds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(16))),
   baseRef: Schema.optional(TrimmedNonEmptyString),
 });
 export type ReviewBranchCommitsInput = typeof ReviewBranchCommitsInput.Type;

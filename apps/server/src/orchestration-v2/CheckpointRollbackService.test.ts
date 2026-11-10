@@ -561,6 +561,9 @@ const seedRollbackHistory = Effect.gen(function* () {
   const restored: CheckpointId[] = [];
   const deletedRefs: CheckpointId[] = [];
   const committed: OrchestrationV2DomainEvent[] = [];
+  const restoreFailureRef = { current: false };
+  const skippedLinkedRootsRef = { current: [] as string[] };
+  const preservedRoots: string[] = [];
   const serviceLayer = layerCheckpointRollbackService.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -568,11 +571,21 @@ const seedRollbackHistory = Effect.gen(function* () {
         IdAllocator.layer,
         Layer.mock(CheckpointService.CheckpointServiceV2)({
           restore: ({ checkpoint }) =>
+            restoreFailureRef.current
+              ? Effect.fail(
+                  new CheckpointService.CheckpointRestoreError({
+                    scopeId,
+                    checkpointId: checkpoint.id,
+                    cause: "file restore failed",
+                  }),
+                )
+              : Effect.sync(() => {
+                  restored.push(checkpoint.id);
+                  return { skippedLinkedRoots: skippedLinkedRootsRef.current };
+                }),
+          deleteStaleRefs: ({ checkpoints, preserveRoots }) =>
             Effect.sync(() => {
-              restored.push(checkpoint.id);
-            }),
-          deleteStaleRefs: ({ checkpoints }) =>
-            Effect.sync(() => {
+              preservedRoots.push(...(preserveRoots ?? []));
               deletedRefs.push(...checkpoints.map((checkpoint) => checkpoint.id));
             }),
         }),
@@ -629,6 +642,9 @@ const seedRollbackHistory = Effect.gen(function* () {
     restored,
     deletedRefs,
     committed,
+    restoreFailureRef,
+    skippedLinkedRootsRef,
+    preservedRoots,
   };
 });
 
@@ -729,5 +745,53 @@ it.layer(ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMe
           );
         }),
     );
+
+    it.effect(
+      "retains stale checkpoint refs when file restoration fails but persists domain rollback events",
+      () =>
+        Effect.gen(function* () {
+          const history = yield* seedRollbackHistory;
+          history.restoreFailureRef.current = true;
+
+          const error = yield* history.rollback(2).pipe(Effect.flip);
+          assert.strictEqual(error._tag, "CheckpointRollbackExecutionError");
+          assert.strictEqual(error.reason, "file-restore-failed");
+          assert.strictEqual(
+            typeof error.cause === "object" && error.cause !== null && "_tag" in error.cause
+              ? (error.cause as { _tag: unknown })._tag
+              : undefined,
+            "CheckpointRestoreError",
+          );
+
+          // deleteStaleRefs was skipped so git refs are retained for retries
+          assert.deepEqual(history.deletedRefs, []);
+
+          // But session rollback and domain events were still committed
+          assert.deepEqual(history.rollbackCounts, [4]);
+          const records = yield* history.store.getThreadRecords(history.threadId, [
+            "runs",
+            "nodes",
+            "checkpoints",
+          ]);
+          assert.strictEqual(
+            records.runs.find((run) => run.id === history.runId(3))?.status,
+            "rolled_back",
+          );
+        }),
+    );
+    it.effect(
+      "preserves stale refs for skipped linked workspaces and reports file-restore-failed",
+      () =>
+        Effect.gen(function* () {
+          const history = yield* seedRollbackHistory;
+          history.skippedLinkedRootsRef.current = ["/repo/mercusuar"];
+
+          const error = yield* history.rollback(2).pipe(Effect.flip);
+          assert.strictEqual(error._tag, "CheckpointRollbackExecutionError");
+          assert.strictEqual(error.reason, "file-restore-failed");
+          assert.deepEqual(history.preservedRoots, ["/repo/mercusuar"]);
+        }),
+    );
+
   },
 );
