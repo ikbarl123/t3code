@@ -697,11 +697,28 @@ export const layer: Layer.Layer<
                       })
                       .pipe(Effect.ignore),
                   ),
-                  Effect.orElseSucceed(() => true),
+                  Effect.catch((cause) =>
+                    Effect.logWarning("orchestration V2 linked workspace drift check failed", {
+                      scopeId: input.scope.id,
+                      workspaceRoot: snapshot.workspaceRoot,
+                      errorTag:
+                        typeof cause === "object" && cause !== null && "_tag" in cause
+                          ? String((cause as { _tag: unknown })._tag)
+                          : undefined,
+                      exitCode:
+                        typeof cause === "object" &&
+                        cause !== null &&
+                        "_tag" in cause &&
+                        (cause as { _tag: unknown })._tag === "VcsProcessExitError" &&
+                        "exitCode" in cause
+                          ? (cause as { exitCode: unknown }).exitCode
+                          : undefined,
+                    }).pipe(Effect.as(true)),
+                  ),
                 );
                 if (drifted) {
                   yield* Effect.logWarning(
-                    "orchestration V2 linked workspace restore skipped due to external modifications",
+                    "orchestration V2 linked workspace restore skipped because drift was detected or could not be checked",
                     {
                       scopeId: input.scope.id,
                       workspaceRoot: snapshot.workspaceRoot,
