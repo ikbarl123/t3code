@@ -32,7 +32,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { useThreadShells, waitForProjectRemoval } from "../../state/entities";
+import { useProjects, useThreadShells, waitForProjectRemoval } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { Alert, AlertDescription } from "../ui/alert";
@@ -435,17 +435,33 @@ function ProjectDetail({
       ) : null}
     </div>
   );
+  const allProjects = useProjects();
+  const currentLinkedWorkspaces: ReadonlyArray<ProjectLinkedWorkspace> =
+    representative.linkedWorkspaces ?? [];
+  const availableProjectsToImport = Array.from(
+    new Map(
+      allProjects
+        .filter(
+          (p) =>
+            p.environmentId === representative.environmentId &&
+            p.id !== representative.id &&
+            Boolean(p.workspaceRoot) &&
+            p.workspaceRoot !== representative.workspaceRoot &&
+            !currentLinkedWorkspaces.some((linked) => linked.workspaceRoot === p.workspaceRoot),
+        )
+        .map((p) => [p.workspaceRoot, p]),
+    ).values(),
+  );
+  const [selectedProjectRootToImport, setSelectedProjectRootToImport] = useState<string>("");
   const [newLinkedRepoLabel, setNewLinkedRepoLabel] = useState("");
   const [newLinkedRepoPath, setNewLinkedRepoPath] = useState("");
   const [isSavingLinkedRepos, setIsSavingLinkedRepos] = useState(false);
-  const currentLinkedWorkspaces: ReadonlyArray<ProjectLinkedWorkspace> =
-    representative.linkedWorkspaces ?? [];
 
-  const handleAddLinkedRepo = async () => {
-    const trimmedPath = newLinkedRepoPath.trim();
+  const linkWorkspaceRoot = async (workspaceRoot: string, desiredLabel?: string) => {
+    const trimmedPath = workspaceRoot.trim();
     if (!trimmedPath) {
       toastManager.add({ type: "warning", title: "Repository path cannot be empty" });
-      return;
+      return false;
     }
     if (
       trimmedPath === representative.workspaceRoot ||
@@ -456,10 +472,10 @@ function ProjectDetail({
         title: "Repository already linked",
         description: `${trimmedPath} is already attached to this project.`,
       });
-      return;
+      return false;
     }
     const inferredLabel =
-      newLinkedRepoLabel.trim() ||
+      desiredLabel?.trim() ||
       trimmedPath.split(/[\\/]/).filter(Boolean).pop() ||
       "repo";
     const id = `${inferredLabel.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}-${Date.now().toString(36)}`;
@@ -487,9 +503,30 @@ function ProjectDetail({
       "Failed to link repository",
     );
     setIsSavingLinkedRepos(false);
-    if (result._tag === "Success") {
+    return result._tag === "Success";
+  };
+
+  const handleAddLinkedRepo = async () => {
+    const success = await linkWorkspaceRoot(newLinkedRepoPath, newLinkedRepoLabel);
+    if (success) {
       setNewLinkedRepoLabel("");
       setNewLinkedRepoPath("");
+    }
+  };
+
+  const handleImportExistingProject = async () => {
+    const projectToImport = availableProjectsToImport.find(
+      (p) => p.workspaceRoot === selectedProjectRootToImport,
+    );
+    if (!projectToImport) return;
+    const success = await linkWorkspaceRoot(projectToImport.workspaceRoot, projectToImport.title);
+    if (success) {
+      setSelectedProjectRootToImport("");
+      toastManager.add({
+        type: "success",
+        title: "Repository linked",
+        description: `Attached ${projectToImport.title} to this project.`,
+      });
     }
   };
 
@@ -534,9 +571,51 @@ function ProjectDetail({
           }
         />
       ))}
+      {availableProjectsToImport.length > 0 ? (
+        <SettingsRow
+          title="Import from existing project"
+          description="Select an existing project in this environment to attach it as a linked repository."
+          control={
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <Select
+                value={selectedProjectRootToImport}
+                onValueChange={(val) => setSelectedProjectRootToImport(val ?? "")}
+                disabled={!canEditGroup || isSavingLinkedRepos}
+              >
+                <SelectTrigger size="sm" className="w-full sm:w-64" aria-label="Select existing project to link">
+                  <SelectValue placeholder="Choose a project..." />
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {availableProjectsToImport.map((project) => (
+                    <SelectItem
+                      key={`${project.environmentId}:${project.id}`}
+                      value={project.workspaceRoot}
+                    >
+                      <span className="flex flex-col text-left">
+                        <span className="font-medium">{project.title}</span>
+                        <span className="max-w-64 truncate text-2xs text-muted-foreground">
+                          {project.workspaceRoot}
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canEditGroup || isSavingLinkedRepos || !selectedProjectRootToImport}
+                onClick={() => void handleImportExistingProject()}
+              >
+                Import project
+              </Button>
+            </div>
+          }
+        />
+      ) : null}
       <SettingsRow
-        title="Add linked repository"
-        description="Provide an optional short label and the absolute path to the Git repository on disk."
+        title="Add linked repository manually"
+        description="Provide an optional short label and the absolute path to any Git repository on disk."
         control={
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <Input
