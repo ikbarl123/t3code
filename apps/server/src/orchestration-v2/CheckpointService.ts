@@ -672,7 +672,7 @@ export const layer: Layer.Layer<
               );
               if (latestSnapshot !== undefined) {
                 const tempDriftRef = CheckpointRef.make(
-                  `${latestSnapshot.ref}/rollback-drift-check`,
+                  `${latestSnapshot.ref}-rollback-drift-check`,
                 );
                 const drifted = yield* Effect.gen(function* () {
                   yield* checkpointStore.captureCheckpoint({
@@ -697,7 +697,7 @@ export const layer: Layer.Layer<
                       })
                       .pipe(Effect.ignore),
                   ),
-                  Effect.orElseSucceed(() => false),
+                  Effect.orElseSucceed(() => true),
                 );
                 if (drifted) {
                   yield* Effect.logWarning(

@@ -179,3 +179,126 @@ it.effect(
       }).pipe(Effect.provide(layerTest));
     }),
 );
+
+it.effect(
+  "skips restoring linkedWorkspaces when external drift or check failure occurs, using sibling temp refs",
+  () =>
+    Effect.gen(function* () {
+      const scope: OrchestrationV2CheckpointScope = {
+        id: CheckpointScopeId.make("checkpoint-scope:drift-check"),
+        threadId: ThreadId.make("thread:drift-check"),
+        runId: RunId.make("run:drift-check:1"),
+        nodeId: NodeId.make("node:drift-check:1"),
+        parentScopeId: null,
+        providerThreadId: ProviderThreadId.make("provider-thread:drift-check"),
+        kind: "root_run",
+        ordinalWithinParent: 0,
+        advancesAppRunCount: true,
+        cwd: "/repo/docs",
+        createdAt: DateTime.makeUnsafe("2026-07-28T00:00:00.000Z"),
+      };
+      const linkedWorkspaces = [
+        {
+          id: "mercusuar",
+          label: "mercusuar",
+          workspaceRoot: "/repo/mercusuar",
+        },
+      ];
+      const capturedRefs: string[] = [];
+      const restoredCwds: string[] = [];
+      const deletedRefs: string[] = [];
+      let diffOutput = "1\t0\text.ts\0";
+      let captureError: Error | null = null;
+
+      const layerTest = CheckpointService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            Layer.mock(CheckpointStore.CheckpointStore)({
+              isGitRepository: () => Effect.succeed(true),
+              hasCheckpointRef: () => Effect.succeed(true),
+              captureCheckpoint: ({ checkpointRef }) =>
+                Effect.gen(function* () {
+                  capturedRefs.push(checkpointRef);
+                  if (captureError) yield* Effect.fail(captureError);
+                }),
+              diffCheckpoints: () => Effect.succeed(diffOutput),
+              listAuthoredPaths: () => Effect.succeed(null),
+              deleteCheckpointRefs: ({ checkpointRefs }) =>
+                Effect.sync(() => {
+                  deletedRefs.push(...checkpointRefs);
+                }),
+              restoreCheckpoint: ({ cwd }) =>
+                Effect.sync(() => {
+                  restoredCwds.push(cwd);
+                  return true;
+                }),
+            }),
+          ),
+        ),
+        Layer.provideMerge(NodeCrypto.layer),
+      );
+
+      yield* Effect.gen(function* () {
+        const checkpoints = yield* CheckpointService.CheckpointServiceV2;
+        const checkpoint1 = yield* checkpoints.capture({
+          scope,
+          ordinalWithinScope: 1,
+          runId: scope.runId!,
+          nodeId: scope.nodeId!,
+          appRunOrdinal: 1,
+          capturedAt: scope.createdAt,
+          linkedWorkspaces,
+        });
+        const checkpoint2 = yield* checkpoints.capture({
+          scope,
+          ordinalWithinScope: 2,
+          runId: scope.runId!,
+          nodeId: scope.nodeId!,
+          appRunOrdinal: 2,
+          capturedAt: scope.createdAt,
+          linkedWorkspaces,
+        });
+
+        const latestRef = checkpoint2.repoSnapshots?.[0]?.ref;
+        assert.ok(latestRef);
+
+        // Case 1: Drift detected (diffOutput is non-empty)
+        yield* checkpoints.restore({
+          scope,
+          checkpoint: checkpoint1,
+          staleCheckpoints: [checkpoint2],
+        });
+        // Sibling ref was used (ends with -rollback-drift-check, not /rollback-drift-check)
+        const expectedTempRef = `${latestRef}-rollback-drift-check`;
+        assert.ok(capturedRefs.includes(expectedTempRef));
+        assert.ok(!capturedRefs.some((ref) => ref.includes("/rollback-drift-check")));
+        assert.ok(deletedRefs.includes(expectedTempRef));
+        // Linked workspace was skipped because of drift; only primary cwd restored
+        assert.deepEqual(restoredCwds, ["/repo/docs"]);
+
+        // Case 2: Capture fails during drift check -> safely treated as drifted (skipped)
+        restoredCwds.length = 0;
+        deletedRefs.length = 0;
+        captureError = new Error("cannot lock ref");
+        yield* checkpoints.restore({
+          scope,
+          checkpoint: checkpoint1,
+          staleCheckpoints: [checkpoint2],
+        });
+        assert.deepEqual(restoredCwds, ["/repo/docs"]);
+        assert.ok(deletedRefs.includes(expectedTempRef));
+
+        // Case 3: No drift (diffOutput is empty, capture succeeds) -> linked workspace is restored
+        restoredCwds.length = 0;
+        captureError = null;
+        diffOutput = "";
+        yield* checkpoints.restore({
+          scope,
+          checkpoint: checkpoint1,
+          staleCheckpoints: [checkpoint2],
+        });
+        assert.deepEqual(restoredCwds, ["/repo/docs", "/repo/mercusuar"]);
+      }).pipe(Effect.provide(layerTest));
+    }),
+);
