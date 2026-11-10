@@ -113,7 +113,7 @@ import { sourceControlClients } from "@t3tools/client-runtime/source-control-cli
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { useOpenLink } from "~/browser/useOpenLink";
 
-interface GitActionsControlProps {
+export interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
@@ -122,6 +122,11 @@ interface GitActionsControlProps {
   showChanges?: boolean;
   onOpenChanges?: () => void;
   syncThreadBranch?: boolean;
+  inlineSuccess?: InlineGitActionSuccess | null;
+  onInlineSuccessChange?: (
+    success: InlineGitActionSuccess | null,
+    targetCwd?: string | null,
+  ) => void;
 }
 
 interface PendingDefaultBranchAction {
@@ -143,7 +148,7 @@ interface RunGitActionWithToastInput {
   filePaths?: string[];
 }
 
-interface InlineGitActionSuccess {
+export interface InlineGitActionSuccess {
   readonly title: string;
   readonly description: string | null;
   readonly scopeKey: string;
@@ -934,6 +939,8 @@ export default function GitActionsControl({
   showChanges = true,
   onOpenChanges,
   syncThreadBranch = true,
+  inlineSuccess: controlledInlineSuccess,
+  onInlineSuccessChange,
 }: GitActionsControlProps) {
   const panelAnchorRef = useRef<HTMLDivElement | null>(null);
   const updateThreadMetadata = useAtomCommand(
@@ -974,7 +981,16 @@ export default function GitActionsControl({
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
-  const [inlineSuccess, setInlineSuccess] = useState<InlineGitActionSuccess | null>(null);
+  const [localInlineSuccess, setLocalInlineSuccess] = useState<InlineGitActionSuccess | null>(null);
+  const inlineSuccess =
+    controlledInlineSuccess !== undefined ? controlledInlineSuccess : localInlineSuccess;
+  const setInlineSuccess = (value: InlineGitActionSuccess | null) => {
+    if (onInlineSuccessChange) {
+      onInlineSuccessChange(value, gitCwd);
+    } else {
+      setLocalInlineSuccess(value);
+    }
+  };
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
   const sourceControlScope = { environmentId: activeEnvironmentId, cwd: gitCwd };

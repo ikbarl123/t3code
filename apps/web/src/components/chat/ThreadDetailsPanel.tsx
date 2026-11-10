@@ -12,12 +12,13 @@ import type { DraftId } from "../../composerDraftStore";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
 import { type EnvMode, type EnvironmentOption } from "../BranchToolbar.logic";
 import { BranchToolbar } from "../BranchToolbar";
-import BaseGitActionsControl from "../GitActionsControl";
+import BaseGitActionsControl, { type InlineGitActionSuccess } from "../GitActionsControl";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
-import { memo, useState, type ComponentProps } from "react";
+import { memo, useCallback, useState, type ComponentProps } from "react";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
@@ -112,6 +113,38 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
+  const [inlineSuccessByCwd, setInlineSuccessByCwd] = useState<
+    ReadonlyMap<string, InlineGitActionSuccess>
+  >(() => new Map());
+
+  const handleInlineSuccessChange = useCallback(
+    (success: InlineGitActionSuccess | null, targetCwd?: string | null) => {
+      const target = targetCwd ?? activeGitCwd;
+      if (!target) return;
+      setInlineSuccessByCwd((prev) => {
+        const next = new Map(prev);
+        if (success) {
+          next.set(target, success);
+        } else {
+          next.delete(target);
+        }
+        return next;
+      });
+      if (success && activeGitCwd && target !== activeGitCwd) {
+        const repoName =
+          repoOptions.find((repo) => repo.workspaceRoot === target)?.label ?? "Repository";
+        toastManager.add(
+          stackedThreadToast({
+            type: "success",
+            title: `${repoName}: ${success.title}`,
+            description: success.description ?? undefined,
+            data: activeThreadRef,
+          }),
+        );
+      }
+    },
+    [activeGitCwd, activeThreadRef, repoOptions],
+  );
   const branchToolbarProps = {
     showGitControls: props.isGitRepo,
     environmentId: props.environmentId,
@@ -279,6 +312,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         gitCwd={activeGitCwd}
                         activeThreadRef={activeThreadRef}
                         syncThreadBranch={activeGitCwd === props.gitCwd}
+                        inlineSuccess={inlineSuccessByCwd.get(activeGitCwd) ?? null}
+                        onInlineSuccessChange={handleInlineSuccessChange}
                         {...(props.draftId ? { draftId: props.draftId } : {})}
                         {...(props.onOpenChanges ? { onOpenChanges: props.onOpenChanges } : {})}
                       />

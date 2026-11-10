@@ -49,19 +49,106 @@ function batchFilePaths(files: ReadonlyArray<TurnDiffFileSummary>) {
   return batches;
 }
 
-function prefixDiffHeaderPaths(patch: string, label: string): string {
+function parseGitDiffLine(rest: string): { from: string; to: string; quoted: boolean } | null {
+  if (rest.startsWith('"a/')) {
+    let sepIndex = -1;
+    for (let i = 1; i < rest.length - 5; i++) {
+      if (rest[i] === '"' && rest[i - 1] !== "\\" && rest.slice(i, i + 5) === '" "b/') {
+        sepIndex = i;
+        break;
+      }
+    }
+    if (sepIndex !== -1 && rest.endsWith('"')) {
+      const from = rest.slice(3, sepIndex);
+      const to = rest.slice(sepIndex + 5, -1);
+      return { from, to, quoted: true };
+    }
+  }
+
+  if (rest.startsWith("a/")) {
+    const sepIndex = rest.indexOf(" b/");
+    if (sepIndex !== -1) {
+      const from = rest.slice(2, sepIndex);
+      const to = rest.slice(sepIndex + 3);
+      return { from, to, quoted: false };
+    }
+  }
+
+  return null;
+}
+
+export function prefixDiffHeaderPaths(patch: string, label: string): string {
   if (!patch) return "";
-  return patch
-    .replace(
-      /^diff --git a\/(.*?) b\/(.*)$/gm,
-      (_match, from: string, to: string) => `diff --git a/[${label}]/${from} b/[${label}]/${to}`,
-    )
-    .replace(/^--- a\/(.*)$/gm, (_match, path: string) => `--- a/[${label}]/${path}`)
-    .replace(/^\+\+\+ b\/(.*)$/gm, (_match, path: string) => `+++ b/[${label}]/${path}`)
-    .replace(
-      /^(rename|copy) (from|to) (.*)$/gm,
-      (_match, kind: string, side: string, path: string) => `${kind} ${side} [${label}]/${path}`,
-    );
+  const lines = patch.split("\n");
+  const result: string[] = [];
+  let inHeader = false;
+
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      inHeader = true;
+      const parsed = parseGitDiffLine(line.slice("diff --git ".length));
+      if (parsed) {
+        if (parsed.quoted) {
+          result.push(`diff --git "a/[${label}]/${parsed.from}" "b/[${label}]/${parsed.to}"`);
+        } else {
+          result.push(`diff --git a/[${label}]/${parsed.from} b/[${label}]/${parsed.to}`);
+        }
+      } else {
+        result.push(line);
+      }
+      continue;
+    }
+
+    if (line.startsWith("@@ ") && inHeader) {
+      inHeader = false;
+    }
+
+    if (inHeader) {
+      if (line.startsWith("--- a/")) {
+        result.push(`--- a/[${label}]/${line.slice(6)}`);
+      } else if (line.startsWith('--- "a/')) {
+        result.push(`--- "a/[${label}]/${line.slice(7)}`);
+      } else if (line.startsWith("+++ b/")) {
+        result.push(`+++ b/[${label}]/${line.slice(6)}`);
+      } else if (line.startsWith('+++ "b/')) {
+        result.push(`+++ "b/[${label}]/${line.slice(7)}`);
+      } else if (line.startsWith("rename from ")) {
+        const path = line.slice("rename from ".length);
+        result.push(
+          path.startsWith('"')
+            ? `rename from "[${label}]/${path.slice(1)}`
+            : `rename from [${label}]/${path}`,
+        );
+      } else if (line.startsWith("rename to ")) {
+        const path = line.slice("rename to ".length);
+        result.push(
+          path.startsWith('"')
+            ? `rename to "[${label}]/${path.slice(1)}`
+            : `rename to [${label}]/${path}`,
+        );
+      } else if (line.startsWith("copy from ")) {
+        const path = line.slice("copy from ".length);
+        result.push(
+          path.startsWith('"')
+            ? `copy from "[${label}]/${path.slice(1)}`
+            : `copy from [${label}]/${path}`,
+        );
+      } else if (line.startsWith("copy to ")) {
+        const path = line.slice("copy to ".length);
+        result.push(
+          path.startsWith('"')
+            ? `copy to "[${label}]/${path.slice(1)}`
+            : `copy to [${label}]/${path}`,
+        );
+      } else {
+        result.push(line);
+      }
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join("\n");
 }
 
 export class CheckpointDiffQuery extends Context.Service<
