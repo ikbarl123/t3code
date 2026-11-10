@@ -632,8 +632,10 @@ const seedRollbackHistory = Effect.gen(function* () {
 
   return {
     store,
+    apply,
     now,
     threadId,
+    scopeId,
     runId,
     nodeId,
     checkpointId,
@@ -790,6 +792,84 @@ it.layer(ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMe
           assert.strictEqual(error._tag, "CheckpointRollbackExecutionError");
           assert.strictEqual(error.reason, "file-restore-failed");
           assert.deepEqual(history.preservedRoots, ["/repo/mercusuar"]);
+        }),
+    );
+    it.effect(
+      "allows rollback to a missing-primary checkpoint with ready linked workspaces and cleans up subsequent missing-primary checkpoints",
+      () =>
+        Effect.gen(function* () {
+          const history = yield* seedRollbackHistory;
+          const { apply, threadId, scopeId, runId, nodeId, checkpointId, now } = history;
+          // Capture a missing-primary checkpoint at ordinal 3 with ready linked workspace
+          yield* apply({
+            type: "checkpoint.captured",
+            payload: {
+              id: checkpointId(3),
+              threadId,
+              scopeId,
+              runId: runId(3),
+              nodeId: nodeId(3),
+              parentCheckpointId: checkpointId(2),
+              ordinalWithinScope: 3,
+              appRunOrdinal: 3,
+              ref: CheckpointRef.make("refs/t3/rollback-history/3"),
+              status: "missing",
+              files: [],
+              repoSnapshots: [
+                {
+                  workspaceRoot: "/repo/mercusuar",
+                  label: "mercusuar",
+                  ref: CheckpointRef.make("refs/t3/rollback-history/3/linked"),
+                  status: "ready",
+                  files: [],
+                },
+              ],
+              capturedAt: now,
+            },
+          });
+
+          // Rolling back to ordinal 2 includes ordinal 3 (missing primary with ready linked workspace) in deletedRefs
+          yield* history.rollback(2);
+          assert.ok(history.deletedRefs.includes(checkpointId(3)));
+        }),
+    );
+    it.effect(
+      "allows rolling back to a missing-primary checkpoint as target when it has ready linked workspaces",
+      () =>
+        Effect.gen(function* () {
+          const history = yield* seedRollbackHistory;
+          const { apply, threadId, scopeId, runId, nodeId, checkpointId, now } = history;
+          // Update ordinal 2 to be missing primary but ready linked workspace
+          yield* apply({
+            type: "checkpoint.captured",
+            payload: {
+              id: checkpointId(2),
+              threadId,
+              scopeId,
+              runId: runId(2),
+              nodeId: nodeId(2),
+              parentCheckpointId: checkpointId(1),
+              ordinalWithinScope: 2,
+              appRunOrdinal: 2,
+              ref: CheckpointRef.make("refs/t3/rollback-history/2"),
+              status: "missing",
+              files: [],
+              repoSnapshots: [
+                {
+                  workspaceRoot: "/repo/mercusuar",
+                  label: "mercusuar",
+                  ref: CheckpointRef.make("refs/t3/rollback-history/2/linked"),
+                  status: "ready",
+                  files: [],
+                },
+              ],
+              capturedAt: now,
+            },
+          });
+
+          // Rolling back to ordinal 2 succeeds and restores the checkpoint
+          yield* history.rollback(2);
+          assert.ok(history.restored.includes(checkpointId(2)));
         }),
     );
 

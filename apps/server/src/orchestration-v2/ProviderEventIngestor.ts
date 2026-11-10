@@ -16,6 +16,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
+  isRollbackEligibleCheckpoint,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -415,7 +416,7 @@ export const layer: Layer.Layer<
       const runIds = new Set(runs.map((run) => run.id));
       const events: Array<OrchestrationV2DomainEvent> = [];
       for (const checkpoint of projection.checkpoints) {
-        if (checkpoint.status !== "ready" || checkpoint.runId === null) continue;
+        if (!isRollbackEligibleCheckpoint(checkpoint) || checkpoint.runId === null) continue;
         if (!runIds.has(checkpoint.runId)) continue;
         events.push({
           id: yield* eventId(),

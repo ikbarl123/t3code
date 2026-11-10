@@ -2,6 +2,7 @@ import {
   CheckpointId,
   CheckpointRef,
   CheckpointScopeId,
+  isRollbackEligibleCheckpoint,
   NodeId,
   OrchestrationV2Checkpoint,
   OrchestrationV2CheckpointScope,
@@ -632,13 +633,7 @@ export const layer: Layer.Layer<
           ...(input.checkpoint.repoSnapshots ?? []).map((snapshot) => snapshot.workspaceRoot),
         ],
         Effect.gen(function* () {
-          const hasReadyLinked = (input.checkpoint.repoSnapshots ?? []).some(
-            (snapshot) => snapshot.status === "ready",
-          );
-          if (
-            input.checkpoint.status !== "ready" &&
-            !(input.checkpoint.status === "missing" && hasReadyLinked)
-          ) {
+          if (!isRollbackEligibleCheckpoint(input.checkpoint)) {
             return yield* new CheckpointRestoreError({
               scopeId: input.scope.id,
               checkpointId: input.checkpoint.id,
@@ -667,13 +662,19 @@ export const layer: Layer.Layer<
           const skippedLinkedRoots: Array<string> = [];
           for (const snapshot of input.checkpoint.repoSnapshots ?? []) {
             if (snapshot.status !== "ready") continue;
-            const latestStale =
-              input.staleCheckpoints && input.staleCheckpoints.length > 0
-                ? input.staleCheckpoints.reduce((max, candidate) =>
+            const candidates = (input.staleCheckpoints ?? []).filter((c) =>
+              c.repoSnapshots?.some(
+                (candidate) =>
+                  candidate.workspaceRoot === snapshot.workspaceRoot && candidate.status === "ready",
+              ),
+            );
+            const latestCandidate =
+              candidates.length > 0
+                ? candidates.reduce((max, candidate) =>
                     candidate.ordinalWithinScope > max.ordinalWithinScope ? candidate : max,
                   )
                 : undefined;
-            const latestSnapshot = latestStale?.repoSnapshots?.find(
+            const latestSnapshot = latestCandidate?.repoSnapshots?.find(
               (candidate) =>
                 candidate.workspaceRoot === snapshot.workspaceRoot && candidate.status === "ready",
             );
@@ -794,10 +795,17 @@ export const layer: Layer.Layer<
           ),
         ],
         Effect.gen(function* () {
-          yield* checkpointStore.deleteCheckpointRefs({
-            cwd: input.scope.cwd,
-            checkpointRefs: input.checkpoints.map((checkpoint) => checkpoint.ref),
-          });
+          const readyPrimaryRefs = input.checkpoints
+            .filter((checkpoint) => checkpoint.status === "ready")
+            .map((checkpoint) => checkpoint.ref);
+          if (readyPrimaryRefs.length > 0) {
+            yield* checkpointStore
+              .deleteCheckpointRefs({
+                cwd: input.scope.cwd,
+                checkpointRefs: readyPrimaryRefs,
+              })
+              .pipe(Effect.ignore);
+          }
           const refsByLinkedRoot = new Map<string, Array<CheckpointRef>>();
           for (const checkpoint of input.checkpoints) {
             for (const snapshot of checkpoint.repoSnapshots ?? []) {

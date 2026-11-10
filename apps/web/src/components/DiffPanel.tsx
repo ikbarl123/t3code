@@ -264,6 +264,7 @@ export default function DiffPanel({
           id: "primary",
           label: activeProject?.title ?? (primaryCwd.split(/[\\/]/).filter(Boolean).pop() ?? "Primary"),
           workspaceRoot: primaryCwd,
+          repositoryIdentity: activeProject?.repositoryIdentity,
         },
         ...linkedWorkspaces,
       ]
@@ -407,12 +408,22 @@ export default function DiffPanel({
       ? branchCommits?.commits.find((c) => c.sha === selectedCommitSha)
       : undefined;
   const awaitingCommitRepo =
-    selectedCommitSha !== null && hasMultipleRepos && !resolvedSelectedRepo && !selectedCommit;
+    selectedCommitSha !== null &&
+    hasMultipleRepos &&
+    !resolvedSelectedRepo &&
+    !selectedCommit &&
+    branchCommits == null &&
+    !branchCommitsQuery.error;
   const selectedCommitCwd = awaitingCommitRepo ? undefined : (selectedCommit?.cwd ?? activeCwd);
+  const selectedOwningRepo = selectedCommitCwd
+    ? projectRepos.find((repo) => repo.workspaceRoot === selectedCommitCwd)
+    : undefined;
   const activeRepositoryRoot =
     selectedCommitCwd === primaryCwd && !activeThread?.worktreePath
       ? activeProject?.repositoryIdentity?.rootPath
-      : selectedCommitCwd;
+      : (selectedOwningRepo && "repositoryIdentity" in selectedOwningRepo
+          ? selectedOwningRepo.repositoryIdentity?.rootPath
+          : undefined) ?? selectedCommitCwd;
   const gitStatusQuery = useEnvironmentQuery(
     activeThread !== null && activeThread !== undefined && selectedCommitCwd != null
       ? vcsEnvironment.status({
@@ -473,12 +484,17 @@ export default function DiffPanel({
     selectedCommitSha !== null && selectedGitSource?.headRef === selectedCommitSha
       ? selectedGitSource.commitSubject
       : undefined;
+  const isPrimaryOnlyGitScope = hasMultipleRepos && !resolvedSelectedRepo;
   const selectedGitScopeLabel =
     selectedCommitSha !== null
       ? (selectedCommitSubject ?? `Commit ${selectedCommitSha.slice(0, 7)}`)
       : selectedGitScope === "unstaged"
-        ? "Uncommitted"
-        : "Changes";
+        ? isPrimaryOnlyGitScope
+          ? "Uncommitted (Primary)"
+          : "Uncommitted"
+        : isPrimaryOnlyGitScope
+          ? "Changes (Primary)"
+          : "Changes";
   const selectedScopeLabel = toolCallSelection
     ? "Tool call"
     : selectedRunId === null
@@ -498,10 +514,11 @@ export default function DiffPanel({
     selectedCommitSha !== null && selectedCommitCwd
       ? projectRepos.find((repo) => repo.workspaceRoot === selectedCommitCwd)
       : undefined;
-  const selectedCommitRepoIdentity =
-    selectedCommitOwningRepo && "repositoryIdentity" in selectedCommitOwningRepo
-      ? selectedCommitOwningRepo.repositoryIdentity
-      : activeProject?.repositoryIdentity;
+  const selectedCommitRepoIdentity = selectedCommitOwningRepo
+    ? ("repositoryIdentity" in selectedCommitOwningRepo
+        ? selectedCommitOwningRepo.repositoryIdentity
+        : undefined)
+    : activeProject?.repositoryIdentity;
   const selectedCommitUrl =
     headerCommitSha !== null
       ? projectCommitUrl(selectedCommitRepoIdentity, headerCommitSha)
@@ -537,9 +554,10 @@ export default function DiffPanel({
       ? activeCheckpointDiff
       : branchDiffPreview;
   const isLoadingSelectedPatch =
-    selectedPatchQuery.isPending &&
-    (selectedPatchQuery.data === null ||
-      (isGitSelection && preview?.incomplete === true && selectedGitSource?.files?.length === 0));
+    (selectedPatchQuery.isPending &&
+      (selectedPatchQuery.data === null ||
+        (isGitSelection && preview?.incomplete === true && selectedGitSource?.files?.length === 0))) ||
+    (isGitSelection && awaitingCommitRepo);
   const selectedPatchError = toolCallSelection
     ? toolCallDetail.error
     : selectedTurn
@@ -972,10 +990,14 @@ export default function DiffPanel({
           <DropdownMenuContent align="start">
             <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
               <DropdownMenuRadioItem value="branch" closeOnClick>
-                <span>Changes</span>
+                <span>{hasMultipleRepos && !resolvedSelectedRepo ? "Changes (Primary)" : "Changes"}</span>
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="unstaged" closeOnClick>
-                <span>Uncommitted</span>
+                <span>
+                  {hasMultipleRepos && !resolvedSelectedRepo
+                    ? "Uncommitted (Primary)"
+                    : "Uncommitted"}
+                </span>
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="latest" closeOnClick>
                 <span>Latest turn</span>
@@ -1022,11 +1044,12 @@ export default function DiffPanel({
                   {branchCommits?.commits.map((commit) => {
                     const commitOwningRepo = commit.cwd
                       ? projectRepos.find((repo) => repo.workspaceRoot === commit.cwd)
-                      : undefined;
-                    const commitRepoIdentity =
-                      commitOwningRepo && "repositoryIdentity" in commitOwningRepo
-                        ? commitOwningRepo.repositoryIdentity
-                        : activeProject?.repositoryIdentity;
+                      : resolvedSelectedRepo;
+                    const commitRepoIdentity = commitOwningRepo
+                      ? ("repositoryIdentity" in commitOwningRepo
+                          ? commitOwningRepo.repositoryIdentity
+                          : undefined)
+                      : activeProject?.repositoryIdentity;
                     const commitUrl = projectCommitUrl(commitRepoIdentity, commit.sha);
                     return (
                       <div

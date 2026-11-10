@@ -1433,6 +1433,18 @@ export const OrchestrationV2Checkpoint = Schema.Struct({
 });
 export type OrchestrationV2Checkpoint = typeof OrchestrationV2Checkpoint.Type;
 
+export function isRollbackEligibleCheckpoint(
+  checkpoint: Pick<OrchestrationV2Checkpoint, "status"> & {
+    readonly repoSnapshots?: ReadonlyArray<{ readonly status: string }> | undefined;
+  },
+): boolean {
+  return (
+    checkpoint.status === "ready" ||
+    (checkpoint.status === "missing" &&
+      (checkpoint.repoSnapshots ?? []).some((snapshot) => snapshot.status === "ready"))
+  );
+}
+
 export const OrchestrationV2CheckpointRollbackRequest = Schema.Struct({
   scopeId: CheckpointScopeId,
   checkpointId: CheckpointId,

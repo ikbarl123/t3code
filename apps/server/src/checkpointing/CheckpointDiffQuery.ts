@@ -52,9 +52,16 @@ function batchFilePaths(files: ReadonlyArray<TurnDiffFileSummary>) {
 function prefixDiffHeaderPaths(patch: string, label: string): string {
   if (!patch) return "";
   return patch
-    .replace(/^diff --git a\/(.*?) b\/(.*)$/gm, `diff --git a/[${label}]/$1 b/[${label}]/$2`)
-    .replace(/^--- a\/(.*)$/gm, `--- a/[${label}]/$1`)
-    .replace(/^\+\+\+ b\/(.*)$/gm, `+++ b/[${label}]/$1`);
+    .replace(
+      /^diff --git a\/(.*?) b\/(.*)$/gm,
+      (_match, from: string, to: string) => `diff --git a/[${label}]/${from} b/[${label}]/${to}`,
+    )
+    .replace(/^--- a\/(.*)$/gm, (_match, path: string) => `--- a/[${label}]/${path}`)
+    .replace(/^\+\+\+ b\/(.*)$/gm, (_match, path: string) => `+++ b/[${label}]/${path}`)
+    .replace(
+      /^(rename|copy) (from|to) (.*)$/gm,
+      (_match, kind: string, side: string, path: string) => `${kind} ${side} [${label}]/${path}`,
+    );
 }
 
 export class CheckpointDiffQuery extends Context.Service<

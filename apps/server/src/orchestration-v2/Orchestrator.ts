@@ -75,6 +75,7 @@ import {
   ThreadId,
   TurnItemId,
   TrimmedNonEmptyString,
+  isRollbackEligibleCheckpoint,
   managedRuntimeModeCeilingMessage,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
@@ -12409,7 +12410,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Checkpoint ${command.checkpointId} was not found.`,
         });
       }
-      if (targetCheckpoint.status !== "ready") {
+      if (!isRollbackEligibleCheckpoint(targetCheckpoint)) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,

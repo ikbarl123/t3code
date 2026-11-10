@@ -1,6 +1,7 @@
 import {
   CheckpointId,
   CheckpointScopeId,
+  isRollbackEligibleCheckpoint,
   latestProviderTurnForAttempt,
   type OrchestrationV2DomainEvent,
   ProviderThreadId,
@@ -159,7 +160,7 @@ export const layer: Layer.Layer<
         checkpoint === undefined ||
         scope === undefined ||
         checkpoint.scopeId !== scope.id ||
-        checkpoint.status !== "ready"
+        !isRollbackEligibleCheckpoint(checkpoint)
       ) {
         return yield* new CheckpointRollbackExecutionError({
           reason: "rollback-target-invalid",
