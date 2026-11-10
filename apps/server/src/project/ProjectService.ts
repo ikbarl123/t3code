@@ -453,14 +453,17 @@ export const make = Effect.gen(function* () {
       });
       if (
         input.linkedWorkspaces === undefined &&
-        workspaceRoot !== previousRoot &&
-        existing.value.linkedWorkspaces !== undefined
+        workspaceRoot !== previousRoot
       ) {
-        yield* normalizeLinkedWorkspaces({
-          projectId: input.projectId,
-          primaryWorkspaceRoot: workspaceRoot,
-          linkedWorkspaces: existing.value.linkedWorkspaces,
-        });
+        const conflicting = existing.value.linkedWorkspaces?.find(
+          (linked) => linked.workspaceRoot === workspaceRoot,
+        );
+        if (conflicting !== undefined) {
+          return yield* new ProjectInvalidError({
+            projectId: input.projectId,
+            detail: `Linked workspace root '${conflicting.workspaceRoot}' duplicates the primary workspace or another linked workspace.`,
+          });
+        }
       }
       yield* commit({
         type: "project.meta.update",

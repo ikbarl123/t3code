@@ -272,6 +272,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                     ) : null}
                     {show.git && activeGitCwd ? (
                       <GitActionsControl
+                        key={activeGitCwd}
                         compact={density !== "full"}
                         showActions={visible.gitActions}
                         showChanges={visible.changes}
