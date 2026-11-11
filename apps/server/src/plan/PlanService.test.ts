@@ -63,6 +63,20 @@ describe("parsePlan", () => {
   });
 });
 
+describe("CRLF plans", () => {
+  const crlf = FIXTURE.replace(/\n/g, "\r\n");
+  it("parses and toggles while keeping CRLF endings", () => {
+    assert.deepStrictEqual(
+      PlanService.parsePlan(crlf).milestones,
+      PlanService.parsePlan(FIXTURE).milestones,
+    );
+    const next = PlanService.setMilestone(crlf, "M1", true, "2026-11-12")!;
+    assert.isTrue(next.includes("\r\n"));
+    assert.isFalse(/[^\r]\n/.test(next));
+    assert.isTrue(PlanService.parsePlan(next).milestones[0]!.done);
+  });
+});
+
 describe("setMilestone", () => {
   it("toggles checkbox, bumps updated and appends a log line", () => {
     const next = PlanService.setMilestone(FIXTURE, "M1", true, "2026-11-12");
@@ -145,9 +159,11 @@ const makeLayer = (docsRoot: string) => {
     Layer.provideMerge(WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))),
     Layer.provideMerge(WorkspacePaths.layer),
     Layer.provideMerge(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcess.layer))),
-    Layer.provideMerge(ServerConfig.ServerConfig.layerTest(process.cwd(), {
-      prefix: "t3-plan-service-test-",
-    })),
+    Layer.provideMerge(
+      ServerConfig.ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3-plan-service-test-",
+      }),
+    ),
     Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodePath.layer)),
   );
 };

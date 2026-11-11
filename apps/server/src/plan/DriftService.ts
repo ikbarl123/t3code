@@ -52,7 +52,11 @@ export const changedPathsFromPatch = (patch: string): ReadonlyArray<string> => {
   const paths = new Set<string>();
   for (const line of patch.split("\n")) {
     const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
-    if (match !== null) paths.add(match[2]!);
+    if (match !== null) {
+      // Both sides, so a file moved out of a watched folder still counts as a change there.
+      paths.add(match[1]!);
+      paths.add(match[2]!);
+    }
   }
   return [...paths];
 };

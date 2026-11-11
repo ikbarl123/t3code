@@ -75,4 +75,9 @@ describe("DriftService", () => {
     ].join("\n");
     assert.deepStrictEqual(changedPathsFromPatch(patch), ["src/db/a.ts", "docs/ddl/x.md"]);
   });
+
+  it("includes the source path of a rename", () => {
+    const patch = "diff --git a/migrations/001.ts b/archive/001.ts\nsimilarity index 100%";
+    assert.deepStrictEqual(changedPathsFromPatch(patch), ["migrations/001.ts", "archive/001.ts"]);
+  });
 });
