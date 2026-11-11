@@ -3830,6 +3830,7 @@ export default function ChatView(props: ChatViewProps) {
                   isServerThread={isServerThread}
                   {...(draftId ? { draftId } : {})}
                   activeProjectName={activeProject?.title}
+                  linkedWorkspaces={activeProject?.linkedWorkspaces}
                   activeProjectScripts={activeProject ? activeProjectScripts : undefined}
                   preferredScriptId={
                     activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null

@@ -2,6 +2,7 @@ import type {
   EditorId,
   EnvironmentId,
   ProjectId,
+  ProjectLinkedWorkspace,
   ProjectScript,
   ResolvedKeybindingsConfig,
   ThreadId,
@@ -11,12 +12,13 @@ import type { DraftId } from "../../composerDraftStore";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
 import { type EnvMode, type EnvironmentOption } from "../BranchToolbar.logic";
 import { BranchToolbar } from "../BranchToolbar";
-import BaseGitActionsControl from "../GitActionsControl";
+import BaseGitActionsControl, { type InlineGitActionSuccess } from "../GitActionsControl";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
-import { memo, useState, type ComponentProps } from "react";
+import { memo, useCallback, useState, type ComponentProps } from "react";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
@@ -39,6 +41,7 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -54,6 +57,7 @@ interface ThreadDetailsPanelProps extends Pick<
   isServerThread: boolean;
   draftId?: DraftId;
   activeProjectName: string | undefined;
+  linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace> | undefined;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -89,11 +93,58 @@ interface ThreadDetailsPanelProps extends Pick<
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const visible = useClientSettings(resolveThreadDetailsVisibility);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const linkedWorkspaces = props.linkedWorkspaces ?? [];
+  const repoOptions = props.gitCwd
+    ? [
+        {
+          id: "primary",
+          label: props.activeProjectName ?? "Primary",
+          workspaceRoot: props.gitCwd,
+        },
+        ...linkedWorkspaces,
+      ]
+    : [];
+  const [selectedRepoCwd, setSelectedRepoCwd] = useState<string | null>(null);
+  const activeGitCwd =
+    repoOptions.find((repo) => repo.workspaceRoot === selectedRepoCwd)?.workspaceRoot ??
+    props.gitCwd;
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
+  const [inlineSuccessByCwd, setInlineSuccessByCwd] = useState<
+    ReadonlyMap<string, InlineGitActionSuccess>
+  >(() => new Map());
+
+  const handleInlineSuccessChange = useCallback(
+    (success: InlineGitActionSuccess | null, targetCwd?: string | null) => {
+      const target = targetCwd ?? activeGitCwd;
+      if (!target) return;
+      setInlineSuccessByCwd((prev) => {
+        const next = new Map(prev);
+        if (success) {
+          next.set(target, success);
+        } else {
+          next.delete(target);
+        }
+        return next;
+      });
+      if (success && activeGitCwd && target !== activeGitCwd) {
+        const repoName =
+          repoOptions.find((repo) => repo.workspaceRoot === target)?.label ?? "Repository";
+        toastManager.add(
+          stackedThreadToast({
+            type: "success",
+            title: `${repoName}: ${success.title}`,
+            description: success.description ?? undefined,
+            data: activeThreadRef,
+          }),
+        );
+      }
+    },
+    [activeGitCwd, activeThreadRef, repoOptions],
+  );
   const branchToolbarProps = {
     showGitControls: props.isGitRepo,
     environmentId: props.environmentId,
@@ -189,7 +240,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         keybindings={props.keybindings}
                         environmentId={props.environmentId}
                         availableEditors={props.availableEditors}
-                        openInCwd={props.gitCwd}
+                        openInCwd={activeGitCwd}
                         enableShortcut={props.openInShortcutEnabled}
                         displayMode="panel"
                       />
@@ -220,16 +271,49 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   separated={density === "full"}
                 >
                   <div className="flex flex-col">
-                    {show.branch ? (
-                      <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
+                    {repoOptions.length > 1 ? (
+                      <div className="px-3 py-1.5">
+                        <ToggleGroup
+                          variant="segmented"
+                          value={activeGitCwd ? [activeGitCwd] : []}
+                          onValueChange={(next) => {
+                            const picked = next[0];
+                            if (typeof picked === "string") {
+                              setSelectedRepoCwd(picked);
+                            }
+                          }}
+                          className="flex-wrap"
+                        >
+                          {repoOptions.map((repo) => (
+                            <Toggle
+                              key={repo.workspaceRoot}
+                              value={repo.workspaceRoot}
+                              title={repo.workspaceRoot}
+                            >
+                              {repo.label}
+                            </Toggle>
+                          ))}
+                        </ToggleGroup>
+                      </div>
                     ) : null}
-                    {show.git ? (
+                    {show.branch && activeGitCwd === props.gitCwd ? (
+                      <BranchToolbar
+                        layout="panel"
+                        panelSection="branch"
+                        {...branchToolbarProps}
+                      />
+                    ) : null}
+                    {show.git && activeGitCwd ? (
                       <GitActionsControl
+                        key={activeGitCwd}
                         compact={density !== "full"}
                         showActions={visible.gitActions}
                         showChanges={visible.changes}
-                        gitCwd={props.gitCwd}
+                        gitCwd={activeGitCwd}
                         activeThreadRef={activeThreadRef}
+                        syncThreadBranch={activeGitCwd === props.gitCwd}
+                        inlineSuccess={inlineSuccessByCwd.get(activeGitCwd) ?? null}
+                        onInlineSuccessChange={handleInlineSuccessChange}
                         {...(props.draftId ? { draftId: props.draftId } : {})}
                         {...(props.onOpenChanges ? { onOpenChanges: props.onOpenChanges } : {})}
                       />

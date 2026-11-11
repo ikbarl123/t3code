@@ -1,5 +1,5 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
-import { pendingGuestMessageCount } from "@t3tools/contracts";
+import { isRollbackEligibleCheckpoint, pendingGuestMessageCount } from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -52,6 +52,7 @@ import {
   idleCompactionOf,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
+  OrchestrationV2RepoCheckpointSnapshot,
   OrchestrationV2CheckpointScopeJson as OrchestrationV2CheckpointScopeJsonSchema,
   OrchestrationV2ContextHandoffJson as OrchestrationV2ContextHandoffJsonSchema,
   OrchestrationV2ContextTransferJson as OrchestrationV2ContextTransferJsonSchema,
@@ -76,6 +77,7 @@ import {
   TurnItemId,
   NodeId,
   ProjectId,
+  ProjectLinkedWorkspace,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import {
@@ -241,19 +243,26 @@ const ProjectionCheckpointContext = Schema.Struct({
   ),
   checkpoints: Schema.Array(
     OrchestrationV2CheckpointJsonSchema.mapFields(
-      ({ scopeId, runId, ordinalWithinScope, appRunOrdinal, status, ref }) => ({
+      ({ scopeId, runId, ordinalWithinScope, appRunOrdinal, status, ref, repoSnapshots }) => ({
         scopeId,
         runId,
         ordinalWithinScope,
         appRunOrdinal,
         status,
         ref,
+        repoSnapshots,
       }),
     ),
   ),
 });
 export type ProjectionCheckpointContext = typeof ProjectionCheckpointContext.Type;
 const decodeCheckpointContext = Schema.decodeUnknownEffect(ProjectionCheckpointContext);
+const decodeRepoSnapshotsJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(OrchestrationV2RepoCheckpointSnapshot)),
+);
+const decodeLinkedWorkspacesJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(ProjectLinkedWorkspace)),
+);
 
 export interface ProjectionCheckpointCaptureContext {
   readonly run: OrchestrationV2Run | undefined;
@@ -263,6 +272,7 @@ export interface ProjectionCheckpointCaptureContext {
   readonly readyCheckpointOrdinals: ReadonlyArray<number>;
   /** Side chats share their parent's worktree and never snapshot it. */
   readonly sideChat: boolean;
+  readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
 }
 
 const RollbackTargetAttempts = Schema.Array(
@@ -5297,13 +5307,30 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               SELECT scope_id AS "scopeId", run_id AS "runId",
                 ordinal_within_scope AS "ordinalWithinScope",
                 app_run_ordinal AS "appRunOrdinal", status,
-                json_extract(payload_json, '$.ref') AS ref
+                json_extract(payload_json, '$.ref') AS ref,
+                json_extract(payload_json, '$.repoSnapshots') AS "repoSnapshotsJson"
               FROM orchestration_v2_projection_checkpoints
               WHERE thread_id = ${threadId}
               ORDER BY scope_id ASC, ordinal_within_scope ASC
             `,
             ]);
-            return yield* decodeCheckpointContext({ runs, checkpointScopes, checkpoints });
+            const parsedCheckpoints = yield* Effect.forEach(
+              checkpoints as ReadonlyArray<Record<string, unknown>>,
+              (row) =>
+                Effect.gen(function* () {
+                  const { repoSnapshotsJson, ...rest } = row;
+                  if (typeof repoSnapshotsJson === "string" && repoSnapshotsJson.length > 0) {
+                    const repoSnapshots = yield* decodeRepoSnapshotsJson(repoSnapshotsJson);
+                    return { ...rest, repoSnapshots };
+                  }
+                  return rest;
+                }),
+            );
+            return yield* decodeCheckpointContext({
+              runs,
+              checkpointScopes,
+              checkpoints: parsedCheckpoints,
+            });
           }),
         )
         .pipe(
@@ -5321,9 +5348,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql
         .withTransaction(
           Effect.gen(function* () {
-            const threadRows = yield* sql<{ readonly side_chat: number | null }>`
-          SELECT json_extract(payload_json, '$.lineage.sideChat') AS side_chat
-          FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} LIMIT 1`;
+            const threadRows = yield* sql<{
+              readonly side_chat: number | null;
+              readonly linked_workspaces_json: string | null;
+            }>`
+          SELECT
+            json_extract(t.payload_json, '$.lineage.sideChat') AS side_chat,
+            p.linked_workspaces_json AS linked_workspaces_json
+          FROM orchestration_v2_projection_threads t
+          LEFT JOIN projection_projects p ON p.project_id = t.project_id AND p.deleted_at IS NULL
+          WHERE t.thread_id = ${threadId} LIMIT 1`;
             if (threadRows[0] === undefined) {
               return yield* new ProjectionStoreThreadNotFoundError({ threadId });
             }
@@ -5364,6 +5398,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   : yield* decodeProviderThreadPayload(providerRows[0].payload_json),
               readyCheckpointOrdinals: readyRows.map(({ ordinal }) => ordinal),
               sideChat: threadRows[0].side_chat === 1,
+              linkedWorkspaces:
+                threadRows[0].linked_workspaces_json === null
+                  ? undefined
+                  : yield* decodeLinkedWorkspacesJson(threadRows[0].linked_workspaces_json).pipe(
+                      Effect.map((items) => (items.length > 0 ? items : undefined)),
+                    ),
             };
           }),
         )
@@ -5419,7 +5459,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               checkpoint === undefined ||
               scope === undefined ||
               checkpoint.scopeId !== scope.id ||
-              checkpoint.status !== "ready" ||
+              !isRollbackEligibleCheckpoint(checkpoint) ||
               providerThread.id !== thread.activeProviderThreadId ||
               providerThread.providerInstanceId !== thread.modelSelection.instanceId
             )
@@ -5450,7 +5490,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             WHERE run.thread_id = ${threadId} AND run.status = 'rolled_back'
               AND attempt.thread_id = ${threadId}`,
                 sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoints
-            WHERE thread_id = ${threadId} AND scope_id = ${scope.id} AND status = 'ready'
+            WHERE thread_id = ${threadId} AND scope_id = ${scope.id} AND status IN ('ready', 'missing')
               AND app_run_ordinal > ${targetOrdinal}
             ORDER BY ordinal_within_scope ASC`,
               ]);
@@ -5481,7 +5521,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               rolledBackAttemptIds: rolledBackAttempts.map(({ id }) => id),
               rootNodes: yield* decodeRows(decodeNodePayload, threadId)(nodeRows),
               providerTurns: yield* decodeRows(decodeProviderTurnPayload, threadId)(turnRows),
-              staleCheckpoints: yield* decodeRows(decodeCheckpointPayload, threadId)(staleRows),
+              staleCheckpoints: (
+                yield* decodeRows(decodeCheckpointPayload, threadId)(staleRows)
+              ).filter(isRollbackEligibleCheckpoint),
             };
           }),
         )

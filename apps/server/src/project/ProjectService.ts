@@ -190,6 +190,9 @@ export const make = Effect.gen(function* () {
     autoPull: row.autoPull,
     projectIcon: row.projectIcon,
     scripts: row.scripts,
+    ...(row.linkedWorkspaces && row.linkedWorkspaces.length > 0
+      ? { linkedWorkspaces: row.linkedWorkspaces }
+      : {}),
     pinnedAt: row.pinnedAt,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
@@ -234,6 +237,58 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
+
+  const normalizeLinkedWorkspaces = Effect.fn("ProjectService.normalizeLinkedWorkspaces")(
+    function* (input: {
+      readonly projectId: ProjectId;
+      readonly primaryWorkspaceRoot: string;
+      readonly linkedWorkspaces: ProjectCreateInput["linkedWorkspaces"];
+    }) {
+      if (input.linkedWorkspaces === undefined) {
+        return undefined;
+      }
+      const normalized = yield* Effect.forEach(input.linkedWorkspaces, (item) =>
+        normalizeWorkspaceRoot({
+          projectId: input.projectId,
+          workspaceRoot: item.workspaceRoot,
+          createIfMissing: false,
+        }).pipe(
+          Effect.map((workspaceRoot) => ({
+            ...item,
+            workspaceRoot,
+          })),
+        ),
+      );
+      const seenRoots = new Set<string>([input.primaryWorkspaceRoot]);
+      const seenIds = new Set<string>();
+      const seenLabels = new Set<string>();
+      for (const item of normalized) {
+        if (seenRoots.has(item.workspaceRoot)) {
+          return yield* new ProjectInvalidError({
+            projectId: input.projectId,
+            detail: `Linked workspace root '${item.workspaceRoot}' duplicates the primary workspace or another linked workspace.`,
+          });
+        }
+        if (seenIds.has(item.id)) {
+          return yield* new ProjectInvalidError({
+            projectId: input.projectId,
+            detail: `Linked workspace id '${item.id}' is duplicated.`,
+          });
+        }
+        const normalizedLabel = item.label.trim().toLowerCase();
+        if (seenLabels.has(normalizedLabel)) {
+          return yield* new ProjectInvalidError({
+            projectId: input.projectId,
+            detail: `Linked workspace label '${item.label}' is duplicated.`,
+          });
+        }
+        seenRoots.add(item.workspaceRoot);
+        seenIds.add(item.id);
+        seenLabels.add(normalizedLabel);
+      }
+      return normalized;
+    },
+  );
 
   const commit = Effect.fn("ProjectService.commit")(function* (command: ProjectCommand) {
     const { projectId } = command;
@@ -358,6 +413,11 @@ export const make = Effect.gen(function* () {
         workspaceRoot: input.workspaceRoot,
         createIfMissing: input.createWorkspaceRootIfMissing ?? false,
       });
+      const linkedWorkspaces = yield* normalizeLinkedWorkspaces({
+        projectId: input.projectId,
+        primaryWorkspaceRoot: workspaceRoot,
+        linkedWorkspaces: input.linkedWorkspaces,
+      });
       yield* commit({
         type: "project.create",
         commandId: input.commandId,
@@ -365,6 +425,7 @@ export const make = Effect.gen(function* () {
         title: input.title,
         workspaceRoot,
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+        ...(linkedWorkspaces === undefined ? {} : { linkedWorkspaces }),
       });
       yield* projectEnrichment.invalidate([workspaceRoot]);
       return yield* readCommitted(input.projectId);
@@ -385,6 +446,25 @@ export const make = Effect.gen(function* () {
               projectId: input.projectId,
               workspaceRoot: input.workspaceRoot,
             });
+      const linkedWorkspaces = yield* normalizeLinkedWorkspaces({
+        projectId: input.projectId,
+        primaryWorkspaceRoot: workspaceRoot,
+        linkedWorkspaces: input.linkedWorkspaces,
+      });
+      if (
+        input.linkedWorkspaces === undefined &&
+        workspaceRoot !== previousRoot
+      ) {
+        const conflicting = existing.value.linkedWorkspaces?.find(
+          (linked) => linked.workspaceRoot === workspaceRoot,
+        );
+        if (conflicting !== undefined) {
+          return yield* new ProjectInvalidError({
+            projectId: input.projectId,
+            detail: `Linked workspace root '${conflicting.workspaceRoot}' duplicates the primary workspace or another linked workspace.`,
+          });
+        }
+      }
       yield* commit({
         type: "project.meta.update",
         commandId: input.commandId,
@@ -401,6 +481,7 @@ export const make = Effect.gen(function* () {
           ? {}
           : { defaultThreadEnvMode: input.defaultThreadEnvMode }),
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+        ...(linkedWorkspaces === undefined ? {} : { linkedWorkspaces }),
         ...(input.pinned === undefined ? {} : { pinned: input.pinned }),
         ...(input.archived === undefined ? {} : { archived: input.archived }),
       });

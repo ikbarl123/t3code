@@ -5,6 +5,7 @@ import {
   type OrchestrationProjectShell,
   StoredProjectIcon,
   ProjectId,
+  ProjectLinkedWorkspace,
   ProjectScript,
   ThreadEnvMode,
 } from "@t3tools/contracts";
@@ -39,6 +40,7 @@ export const ProjectRow = Schema.Struct({
   faviconPath: Schema.NullOr(Schema.String),
   projectIcon: Schema.NullOr(StoredProjectIcon),
   scripts: Schema.Array(ProjectScript),
+  linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
   pinnedAt: Schema.NullOr(IsoDateTime),
   archivedAt: Schema.NullOr(IsoDateTime),
   createdAt: IsoDateTime,
@@ -53,6 +55,7 @@ const ProjectDbRow = Schema.Struct({
   autoPull: Schema.BooleanFromBit,
   projectIcon: Schema.NullOr(Schema.fromJsonString(StoredProjectIcon)),
   scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+  linkedWorkspaces: Schema.fromJsonString(Schema.Array(ProjectLinkedWorkspace)),
 });
 
 function toShell(row: ProjectRow): OrchestrationProjectShell {
@@ -67,6 +70,9 @@ function toShell(row: ProjectRow): OrchestrationProjectShell {
     faviconPath: row.faviconPath,
     projectIcon: row.projectIcon,
     scripts: row.scripts,
+    ...(row.linkedWorkspaces && row.linkedWorkspaces.length > 0
+      ? { linkedWorkspaces: row.linkedWorkspaces }
+      : {}),
     pinnedAt: row.pinnedAt,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
@@ -124,6 +130,7 @@ export const make = Effect.gen(function* () {
         favicon_path AS "faviconPath",
         project_icon_json AS "projectIcon",
         scripts_json AS "scripts",
+        linked_workspaces_json AS "linkedWorkspaces",
         pinned_at AS "pinnedAt",
         archived_at AS "archivedAt",
         created_at AS "createdAt",
@@ -143,7 +150,7 @@ export const make = Effect.gen(function* () {
   });
 
   const upsertRow = (row: ProjectRow) =>
-    encodeRow(row).pipe(
+    encodeRow({ ...row, linkedWorkspaces: row.linkedWorkspaces ?? [] }).pipe(
       Effect.flatMap(
         (encoded) => sql`
           INSERT INTO projection_projects (
@@ -156,6 +163,7 @@ export const make = Effect.gen(function* () {
             favicon_path,
             project_icon_json,
             scripts_json,
+            linked_workspaces_json,
             pinned_at,
             archived_at,
             created_at,
@@ -172,6 +180,7 @@ export const make = Effect.gen(function* () {
             ${encoded.faviconPath},
             ${encoded.projectIcon},
             ${encoded.scripts},
+            ${encoded.linkedWorkspaces},
             ${encoded.pinnedAt},
             ${encoded.archivedAt},
             ${encoded.createdAt},
@@ -188,6 +197,7 @@ export const make = Effect.gen(function* () {
             favicon_path = excluded.favicon_path,
             project_icon_json = excluded.project_icon_json,
             scripts_json = excluded.scripts_json,
+            linked_workspaces_json = excluded.linked_workspaces_json,
             pinned_at = excluded.pinned_at,
             archived_at = excluded.archived_at,
             created_at = excluded.created_at,
@@ -238,6 +248,7 @@ export const make = Effect.gen(function* () {
           faviconPath: payload.faviconPath ?? null,
           projectIcon: payload.projectIcon ?? null,
           scripts: payload.scripts,
+          linkedWorkspaces: payload.linkedWorkspaces ?? [],
           pinnedAt: null,
           archivedAt: null,
           createdAt: payload.createdAt,
@@ -270,6 +281,9 @@ export const make = Effect.gen(function* () {
         ...(payload.faviconPath === undefined ? {} : { faviconPath: payload.faviconPath }),
         ...(payload.projectIcon === undefined ? {} : { projectIcon: payload.projectIcon }),
         ...(payload.scripts === undefined ? {} : { scripts: payload.scripts }),
+        ...(payload.linkedWorkspaces === undefined
+          ? {}
+          : { linkedWorkspaces: payload.linkedWorkspaces }),
         ...(payload.pinnedAt === undefined ? {} : { pinnedAt: payload.pinnedAt }),
         ...(payload.archivedAt === undefined ? {} : { archivedAt: payload.archivedAt }),
         updatedAt: payload.updatedAt,

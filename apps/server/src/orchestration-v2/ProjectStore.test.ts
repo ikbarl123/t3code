@@ -96,5 +96,64 @@ it.layer(ProjectStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemor
         assert.strictEqual(project?.archivedAt, at);
       }),
     );
+
+    it.effect("persists and updates linkedWorkspaces on projection_projects and shells", () =>
+      Effect.gen(function* () {
+        const projects = yield* ProjectStore.ProjectStoreV2;
+        const projectId = ProjectId.make("project-linked");
+        const at = "2026-03-24T00:00:00.000Z";
+        const event = { aggregateKind: "project", aggregateId: projectId, occurredAt: at } as const;
+        const meta = { commandId: null, causationEventId: null, correlationId: null, metadata: {} };
+        const linked = [
+          {
+            id: "mercusuar",
+            label: "mercusuar",
+            workspaceRoot: "/tmp/services/mercusuar",
+          },
+        ];
+        yield* projects.apply({
+          ...event,
+          ...meta,
+          sequence: 1,
+          eventId: EventId.make("event-linked-created"),
+          type: "project.created",
+          payload: {
+            projectId,
+            title: "Docs Vault",
+            workspaceRoot: "/tmp/docs",
+            defaultModelSelection: null,
+            scripts: [],
+            linkedWorkspaces: linked,
+            createdAt: at,
+            updatedAt: at,
+          },
+        });
+        const shellAfterCreate = Option.getOrNull(yield* projects.getShell(projectId));
+        assert.deepStrictEqual(shellAfterCreate?.linkedWorkspaces, linked);
+
+        const updatedLinked = [
+          ...linked,
+          {
+            id: "cosmic",
+            label: "cosmic",
+            workspaceRoot: "/tmp/services/cosmic",
+          },
+        ];
+        yield* projects.apply({
+          ...event,
+          ...meta,
+          sequence: 2,
+          eventId: EventId.make("event-linked-updated"),
+          type: "project.meta-updated",
+          payload: {
+            projectId,
+            linkedWorkspaces: updatedLinked,
+            updatedAt: at,
+          },
+        });
+        const shellAfterUpdate = Option.getOrNull(yield* projects.getShell(projectId));
+        assert.deepStrictEqual(shellAfterUpdate?.linkedWorkspaces, updatedLinked);
+      }),
+    );
   },
 );

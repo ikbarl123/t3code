@@ -1671,6 +1671,12 @@ export const layer: Layer.Layer<
         !noteContinuation
           ? session
           : makeDeliverySession(session, startWithHandoffs);
+      const projectOption = yield* projects
+        .getById(projection.thread.projectId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const linkedWorkspaces = Option.isSome(projectOption)
+        ? projectOption.value.linkedWorkspaces
+        : undefined;
       return runExecution.startRootRun({
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
         appThread: projection.thread,
@@ -1679,6 +1685,7 @@ export const layer: Layer.Layer<
         run: runningRun,
         rootNode: runningRootNode,
         checkpointScope,
+        ...(linkedWorkspaces ? { linkedWorkspaces } : {}),
         providerThread: runningProviderThread,
         attempt: runningAttempt,
         attemptId: attempt.id,

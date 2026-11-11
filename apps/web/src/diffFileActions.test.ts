@@ -30,7 +30,7 @@ describe("openDiffFilePrimaryAction", () => {
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
     ).toMatchObject({
       isOpen: true,
-      activeSurfaceId: "file:Dockerfile",
+      activeSurfaceId: "file:/repo/frontend:Dockerfile",
     });
     expect(openInEditor).not.toHaveBeenCalled();
   });
@@ -43,6 +43,16 @@ describe("openDiffFilePrimaryAction", () => {
         repositoryRoot: "/repo",
       }),
     ).toBe("frontend/Dockerfile");
+  });
+
+  it("resolves worktree-relative paths when worktree is the active repository root", () => {
+    expect(
+      resolveDiffPathForWorkspace({
+        filePath: "src/index.ts",
+        workspaceRoot: "/repo/.worktrees/feature",
+        repositoryRoot: "/repo/.worktrees/feature",
+      }),
+    ).toBe("src/index.ts");
   });
 
   it("handles Windows roots and mixed diff separators", () => {

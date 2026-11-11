@@ -14,6 +14,7 @@ import {
   type ToolActivitySource,
   type ThreadId,
   type TurnItemId,
+  isRollbackEligibleCheckpoint,
 } from "@t3tools/contracts";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 import {
@@ -1049,7 +1050,7 @@ export function findRevertCheckpoint(
 ): OrchestrationV2Checkpoint | undefined {
   return checkpoints.findLast(
     (checkpoint) =>
-      checkpoint.status === "ready" &&
+      isRollbackEligibleCheckpoint(checkpoint) &&
       (turnCount === 0
         ? checkpoint.ordinalWithinScope === 0 && checkpoint.appRunOrdinal === null
         : checkpoint.appRunOrdinal === turnCount),

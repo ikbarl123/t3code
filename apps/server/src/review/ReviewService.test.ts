@@ -22,8 +22,23 @@ function layer(input: {
   readonly worktreesDirectory?: string;
   readonly previousWorktreesDirectories?: ReadonlyArray<string>;
   readonly projectRoots?: ReadonlyArray<string> | "unavailable";
+  readonly linkedWorkspaceRoots?: ReadonlyArray<string>;
   readonly threadWorktrees?: ReadonlyArray<{ worktreePath: string; deleted?: boolean }>;
   readonly gitWorktrees?: ReadonlyArray<string>;
+  readonly branchCommitsByCwd?: Readonly<
+    Record<
+      string,
+      {
+        readonly commits: ReadonlyArray<{
+          readonly sha: string;
+          readonly subject: string;
+          readonly author: string;
+          readonly committedAt: string;
+        }>;
+        readonly truncated: boolean;
+      }
+    >
+  >;
 }) {
   const projectRoots = input.projectRoots ?? [];
   return ReviewService.layer.pipe(
@@ -62,6 +77,17 @@ function layer(input: {
                   workspaceRoot,
                   defaultModelSelection: null,
                   scripts: [],
+                  ...(index === 0 &&
+                  input.linkedWorkspaceRoots &&
+                  input.linkedWorkspaceRoots.length > 0
+                    ? {
+                        linkedWorkspaces: input.linkedWorkspaceRoots.map((root, linkedIdx) => ({
+                          id: `linked-${linkedIdx}`,
+                          label: `linked-${linkedIdx}`,
+                          workspaceRoot: root,
+                        })),
+                      }
+                    : {}),
                   createdAt: "2026-01-01T00:00:00.000Z",
                   updatedAt: "2026-01-01T00:00:00.000Z",
                 })),
@@ -75,6 +101,20 @@ function layer(input: {
         detect: (request) =>
           Effect.sync(() => {
             input.detectCalls?.push({ cwd: request.cwd });
+            if (input.branchCommitsByCwd && request.cwd in input.branchCommitsByCwd) {
+              return {
+                kind: "git" as const,
+                repository: {
+                  kind: "git" as const,
+                  rootPath: request.cwd,
+                  commonDirPath: `${request.cwd}/.git`,
+                  headRef: "main",
+                  headCommitSha: "0000000",
+                  hasWorkingTreeChanges: false,
+                },
+                driver: {} as never,
+              };
+            }
             return null;
           }),
       }),
@@ -82,6 +122,13 @@ function layer(input: {
     Layer.provide(
       Layer.mock(GitVcsDriver.GitVcsDriver)({
         listWorktreePaths: () => Effect.succeed([...(input.gitWorktrees ?? [])]),
+        getReviewBranchCommits: (req) =>
+          Effect.succeed(
+            input.branchCommitsByCwd?.[req.cwd] ?? {
+              commits: [],
+              truncated: false,
+            },
+          ),
       }),
     ),
     Layer.provide(
@@ -257,6 +304,130 @@ describe("ReviewService", () => {
         ),
       );
       assert.strictEqual(result.cwd, checkout);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("allows project linkedWorkspaces roots outside the primary workspaceRoot", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-docs-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const linkedServiceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-review-service-",
+      });
+
+      const result = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getDiffPreview({ cwd: linkedServiceRoot });
+      }).pipe(
+        Effect.provide(
+          layer({
+            workspaceRoot,
+            baseDir,
+            projectRoots: [workspaceRoot],
+            linkedWorkspaceRoots: [linkedServiceRoot],
+          }),
+        ),
+      );
+      assert.strictEqual(result.cwd, linkedServiceRoot);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("aggregates getBranchCommits across cwds newest-first and tolerates rejected cwds", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const docsRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-docs-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const serviceARoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-svc-a-" });
+      const unauthorizedRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
+
+      const result = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getBranchCommits({
+          cwd: docsRoot,
+          cwds: [docsRoot, serviceARoot, docsRoot, unauthorizedRoot],
+        });
+      }).pipe(
+        Effect.provide(
+          layer({
+            workspaceRoot: docsRoot,
+            baseDir,
+            projectRoots: [docsRoot],
+            linkedWorkspaceRoots: [serviceARoot],
+            branchCommitsByCwd: {
+              [docsRoot]: {
+                commits: [
+                  {
+                    sha: "1111111",
+                    subject: "docs: update architecture",
+                    author: "Alice",
+                    committedAt: "2026-01-01T10:00:00.000Z",
+                  },
+                ],
+                truncated: false,
+              },
+              [serviceARoot]: {
+                commits: [
+                  {
+                    sha: "2222222",
+                    subject: "feat: add endpoint",
+                    author: "Bob",
+                    committedAt: "2026-01-01T12:00:00.000Z",
+                  },
+                  {
+                    sha: "3333333",
+                    subject: "feat: timezone offset test",
+                    author: "Charlie",
+                    // 15:00+04:00 is 11:00:00 UTC, which is older than Bob (12:00 UTC) but newer than Alice (10:00 UTC).
+                    // Lexicographically "2026-01-01T15..." would sort ahead of Bob, but timestamp sorting places Bob first.
+                    committedAt: "2026-01-01T15:00:00+04:00",
+                  },
+                ],
+                truncated: true,
+              },
+            },
+          }),
+        ),
+      );
+
+      assert.strictEqual(result.truncated, true);
+      assert.strictEqual(result.commits.length, 3);
+      assert.strictEqual(result.commits[0]?.sha, "2222222");
+      assert.strictEqual(result.commits[0]?.cwd, serviceARoot);
+      assert.strictEqual(result.commits[1]?.sha, "3333333");
+      assert.strictEqual(result.commits[1]?.cwd, serviceARoot);
+      assert.strictEqual(result.commits[2]?.sha, "1111111");
+      assert.strictEqual(result.commits[2]?.cwd, docsRoot);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("propagates failure when primary cwd lookup fails", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const docsRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-docs-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const serviceARoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-svc-a-" });
+      const unauthorizedRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-outside-" });
+
+      const error = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getBranchCommits({
+          cwd: unauthorizedRoot,
+          cwds: [unauthorizedRoot, serviceARoot],
+        });
+      }).pipe(
+        Effect.provide(
+          layer({
+            workspaceRoot: docsRoot,
+            baseDir,
+            projectRoots: [docsRoot],
+            linkedWorkspaceRoots: [serviceARoot],
+          }),
+        ),
+        Effect.flip,
+      );
+
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
