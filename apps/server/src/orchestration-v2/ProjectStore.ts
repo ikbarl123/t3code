@@ -75,6 +75,8 @@ function toShell(row: ProjectRow): OrchestrationProjectShell {
     ...(row.linkedWorkspaces && row.linkedWorkspaces.length > 0
       ? { linkedWorkspaces: row.linkedWorkspaces }
       : {}),
+    docsProjectId: row.docsProjectId,
+    docsGate: row.docsGate,
     pinnedAt: row.pinnedAt,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
