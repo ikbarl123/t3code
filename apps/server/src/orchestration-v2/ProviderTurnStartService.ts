@@ -1643,7 +1643,8 @@ export const layer: Layer.Layer<
             compact || goalCommand || docsContext === null
               ? null
               : yield* docsContext.forTurn({
-                  threadId: projection.thread.id,
+                  // Keyed by native provider thread: a new session has not seen the bundle.
+                  threadId: runningProviderThread.id,
                   projectId: projection.thread.projectId,
                   planPath: projection.thread.planPath ?? null,
                 });
@@ -1672,7 +1673,8 @@ export const layer: Layer.Layer<
             ),
           );
           // Commit only after acceptance, so a refused prompt re-injects next turn.
-          if (docs !== null && docsContext !== null) yield* docsContext.commit(projection.thread.id, docs.text);
+          if (docs !== null && docsContext !== null)
+            yield* docsContext.commit(runningProviderThread.id, docs.text);
           // After provider acceptance, failed delivery bookkeeping must not stop live ingestion.
           const nativeThreadId = runningProviderThread.nativeThreadRef?.nativeId;
           yield* Effect.forEach(
@@ -1717,7 +1719,8 @@ export const layer: Layer.Layer<
         retryHandoff.length === 0 &&
         sideChatHandoff === undefined &&
         restartNote === "" &&
-        !noteContinuation
+        !noteContinuation &&
+        (docsContext === null || projection.thread.planPath == null)
           ? session
           : makeDeliverySession(session, startWithHandoffs);
       return runExecution.startRootRun({

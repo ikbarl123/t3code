@@ -124,7 +124,12 @@ function BoundPlan({
         <p className="font-mono text-muted-foreground text-xs">{planPath}</p>
       </div>
       {plan === null ? (
-        <p className="text-muted-foreground text-xs">Loading plan…</p>
+        <p
+          className="text-muted-foreground text-xs"
+          role={AsyncResult.isFailure(result) ? "alert" : undefined}
+        >
+          {AsyncResult.isFailure(result) ? "Could not read this plan." : "Loading plan…"}
+        </p>
       ) : (
         <PlanChecklist
           milestones={plan.milestones}
@@ -202,11 +207,23 @@ export function ThreadPlanControl({
   const planPath = shell?.planPath ?? null;
   const docsRoot = docsProject.workspaceRoot;
 
+  const reportBindFailure = (title: string) => (outcome: { readonly _tag: string }) => {
+    if (isAtomCommandInterrupted(outcome as never) || outcome._tag !== "Failure") return;
+    toastManager.add({
+      type: "error",
+      title,
+      description: String(squashAtomCommandFailure(outcome as never)),
+    });
+  };
   const pick = (nextPath: string) => {
-    void bindPlan({ environmentId, input: { threadId, planPath: nextPath } });
+    void bindPlan({ environmentId, input: { threadId, planPath: nextPath } }).then(
+      reportBindFailure("Failed to bind plan"),
+    );
   };
   const unbind = () => {
-    void unbindPlan({ environmentId, input: { threadId } });
+    void unbindPlan({ environmentId, input: { threadId } }).then(
+      reportBindFailure("Failed to unbind plan"),
+    );
   };
 
   return (

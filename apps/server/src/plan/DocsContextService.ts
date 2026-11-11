@@ -1,4 +1,4 @@
-import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import type { ProjectId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,11 +30,11 @@ export class DocsContextService extends Context.Service<
   DocsContextService,
   {
     readonly forTurn: (input: {
-      readonly threadId: ThreadId;
+      readonly threadId: string;
       readonly projectId: ProjectId;
       readonly planPath: string | null;
     }) => Effect.Effect<DocsBundle | null>;
-    readonly commit: (threadId: ThreadId, text: string) => Effect.Effect<void>;
+    readonly commit: (threadId: string, text: string) => Effect.Effect<void>;
   }
 >()("t3/plan/DocsContextService") {}
 
@@ -57,15 +57,13 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const projects = yield* ProjectService.ProjectService;
   const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
-  const injectedText = new Map<ThreadId, string>();
+  const injectedText = new Map<string, string>();
 
   const readOptional = (cwd: string, relativePath: string) =>
-    workspaceFileSystem
-      .readFile({ cwd, relativePath, allowMissing: true })
-      .pipe(
-        Effect.map((file) => (file.exists === false ? null : file.contents)),
-        Effect.orElseSucceed(() => null),
-      );
+    workspaceFileSystem.readFile({ cwd, relativePath, allowMissing: true }).pipe(
+      Effect.map((file) => (file.exists === false ? null : file.contents)),
+      Effect.orElseSucceed(() => null),
+    );
 
   const assemble = Effect.fn("DocsContextService.assemble")(function* (
     cwd: string,
@@ -94,7 +92,11 @@ export const make = Effect.gen(function* () {
       const { threadId, planPath } = input;
       if (planPath === null) return null;
       // Absolute and `~` paths would read host files outside the docs project.
-      if (path.isAbsolute(planPath) || planPath.startsWith("~") || planPath.split(/[\\/]/).includes("..")) {
+      if (
+        path.isAbsolute(planPath) ||
+        planPath.startsWith("~") ||
+        planPath.split(/[\\/]/).includes("..")
+      ) {
         return null;
       }
       const project = yield* projects
