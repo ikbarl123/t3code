@@ -1,6 +1,8 @@
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
-import { SearchIcon } from "lucide-react";
+import { RefreshCwIcon, SearchIcon } from "lucide-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Components } from "react-markdown";
 import type { PluggableList } from "unified";
@@ -16,18 +18,23 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { useStableCallback } from "~/hooks/useStableCallback";
-import { DocsPageProvider, type DocsPageControls } from "./docsPageContext";
+import { DocsPageProvider, type DocsPageControls, type NoteTarget } from "./docsPageContext";
 import { docsProjectRefs } from "./docsProjects";
 import { DocsNote } from "./DocsNote";
+import { DocsQuickSwitcher } from "./DocsQuickSwitcher";
+import { DocsSearchSlot } from "./DocsSearchSlot";
+import { DocsSidePanel } from "./DocsSidePanel";
 import { DocsTree } from "./DocsTree";
+import { noteTextAtom } from "./noteText";
+import { useVaultIndex } from "./useVaultIndex";
 
 export interface DocsPageProps {
   /** Vault-relative path of the open note, from the `note` search param. */
   readonly note: string | null;
   readonly onNoteChange: (note: string | null) => void;
-  /** Right column; rendered inside `<aside aria-label="Note details">`. Reads controls via a hook. */
+  /** Right column override; defaults to the note details panel. Reads controls via a hook. */
   readonly sidePanel?: ReactNode | undefined;
-  /** Left column, above the tree; the search button and Ctrl/Cmd+Shift+F appear only when provided. */
+  /** Left column override, above the tree; defaults to the vault content search. */
   readonly searchPanel?: ReactNode | undefined;
   /** Extra remark plugins for the note renderer. */
   readonly remarkPlugins?: PluggableList | undefined;
@@ -72,6 +79,29 @@ export function DocsPage(props: DocsPageProps) {
   );
 }
 
+/** Note text for the side panel and context; null while loading, missing, or with no note open. */
+function useActiveNoteText(
+  projectRef: ScopedProjectRef,
+  cwd: string | null,
+  note: string | null,
+): string | null {
+  const noteResult = useAtomValue(noteTextAtom(projectRef.environmentId, cwd ?? "", note ?? ""));
+  if (note === null || cwd === null || !AsyncResult.isSuccess(noteResult)) return null;
+  return noteResult.value.exists === false ? null : noteResult.value.contents;
+}
+
+/** Re-reads the open note from disk; a no-op until a note and vault are both known. */
+function useActiveNoteRefresh(
+  projectRef: ScopedProjectRef,
+  cwd: string | null,
+  note: string | null,
+): () => void {
+  const refresh = useAtomRefresh(noteTextAtom(projectRef.environmentId, cwd ?? "", note ?? ""));
+  return () => {
+    if (note !== null && cwd !== null) refresh();
+  };
+}
+
 function DocsWorkspace({
   note,
   onNoteChange,
@@ -91,15 +121,18 @@ function DocsWorkspace({
 }) {
   const project = useProject(projectRef);
   const cwd = project?.workspaceRoot ?? null;
+  const vault = useVaultIndex(projectRef.environmentId, cwd);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [target, setTarget] = useState<NoteTarget | null>(null);
   const [history, setHistory] = useState<History>(() =>
     note ? { entries: [note], index: 0 } : { entries: [], index: -1 },
   );
   const canGoBack = history.index > 0;
   const canGoForward = history.index >= 0 && history.index < history.entries.length - 1;
 
-  const openNote = useStableCallback((path: string, _line?: number) => {
-    // ponytail: line is accepted for search results but not scrolled to yet (V3).
+  const openNote = useStableCallback((path: string, next?: NoteTarget) => {
+    setTarget(next ?? null);
     if (path === note) return;
     setHistory((previous) => ({
       entries: [...previous.entries.slice(0, previous.index + 1), path],
@@ -109,29 +142,44 @@ function DocsWorkspace({
   });
   const step = useStableCallback((delta: -1 | 1) => {
     const next = history.index + delta;
-    const target = history.entries[next];
-    if (target === undefined) return;
+    const targetPath = history.entries[next];
+    if (targetPath === undefined) return;
     setHistory({ entries: history.entries, index: next });
-    onNoteChange(target);
+    setTarget(null);
+    onNoteChange(targetPath);
   });
   const toggleSearch = useStableCallback(() => {
-    if (searchPanel !== undefined) setSearchOpen((open) => !open);
+    setSearchOpen((open) => !open);
   });
   const closeSearch = useStableCallback(() => setSearchOpen(false));
+
+  // The note is read once here; DocsNote and the side panel both read the same cached atom.
+  const activeText = useActiveNoteText(projectRef, cwd, note);
+  const refreshNote = useActiveNoteRefresh(projectRef, cwd, note);
+  // useVaultIndex already reloads the vault on focus; the open note is re-read here.
+  const refreshNoteOnFocus = useStableCallback(() => refreshNote());
+  const refreshAll = useStableCallback(() => {
+    vault.refresh();
+    refreshNote();
+  });
+  useEffect(() => {
+    window.addEventListener("focus", refreshNoteOnFocus);
+    return () => window.removeEventListener("focus", refreshNoteOnFocus);
+  }, [refreshNoteOnFocus]);
 
   // Keyboard shortcuts exist only while this page is mounted, so preventDefault never reaches other pages.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window key listener scoped to the docs page, which DOM handlers on the root cannot cover when focus is outside it
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modified = event.ctrlKey || event.metaKey;
-      if (
-        modified &&
-        event.shiftKey &&
-        event.key.toLowerCase() === "f" &&
-        searchPanel !== undefined
-      ) {
+      if (modified && event.shiftKey && event.key.toLowerCase() === "f") {
         event.preventDefault();
         toggleSearch();
+        return;
+      }
+      if (modified && !event.shiftKey && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        setSwitcherOpen((open) => !open);
         return;
       }
       if (event.altKey && !modified && !event.shiftKey && event.key === "ArrowLeft") {
@@ -144,9 +192,22 @@ function DocsWorkspace({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [searchPanel, step, toggleSearch]);
+  }, [step, toggleSearch]);
 
-  const controls: DocsPageControls = { openNote, closeSearch };
+  const controls: DocsPageControls = {
+    openNote,
+    closeSearch,
+    activePath: note,
+    activeText,
+    vault: { paths: vault.paths, index: vault.index, status: vault.status },
+  };
+  const searchSlot =
+    searchPanel !== undefined ? (
+      searchPanel
+    ) : cwd === null ? null : (
+      <DocsSearchSlot environmentId={projectRef.environmentId} docsRoot={cwd} />
+    );
+  const sideSlot = sidePanel !== undefined ? sidePanel : <DocsSidePanel />;
 
   return (
     <DocsPageProvider value={controls}>
@@ -173,7 +234,17 @@ function DocsWorkspace({
           </Select>
         ) : null}
         <div className="ms-auto flex items-center gap-1">
-          {searchPanel !== undefined ? (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Refresh vault"
+            title="Refresh vault"
+            disabled={cwd === null}
+            onClick={refreshAll}
+          >
+            <RefreshCwIcon />
+          </Button>
+          {searchSlot !== null ? (
             <Button
               size="icon-sm"
               variant="ghost"
@@ -192,7 +263,7 @@ function DocsWorkspace({
           aria-label="Vault"
           className="flex w-64 shrink-0 flex-col gap-2 overflow-y-auto border-r p-2"
         >
-          {searchOpen && searchPanel !== undefined ? searchPanel : null}
+          {searchOpen && searchSlot !== null ? searchSlot : null}
           {cwd === null ? (
             <p className="px-2 text-muted-foreground text-xs">Docs project is unavailable.</p>
           ) : (
@@ -217,15 +288,23 @@ function DocsWorkspace({
               onBack={() => step(-1)}
               onForward={() => step(1)}
               onOpenNote={openNote}
+              allPaths={vault.paths}
+              target={target}
               remarkPlugins={remarkPlugins}
               components={components}
             />
           )}
         </main>
         <aside aria-label="Note details" className="w-64 shrink-0 overflow-y-auto border-l p-3">
-          {sidePanel}
+          {sideSlot}
         </aside>
       </div>
+      <DocsQuickSwitcher
+        open={switcherOpen}
+        onOpenChange={setSwitcherOpen}
+        paths={vault.paths}
+        onOpenNote={(path) => openNote(path)}
+      />
     </DocsPageProvider>
   );
 }

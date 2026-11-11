@@ -1,25 +1,31 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
-import { ArrowLeftIcon, ArrowRightIcon, ChevronRightIcon } from "lucide-react";
-import { createContext, use, type AnchorHTMLAttributes } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronRightIcon, FileIcon } from "lucide-react";
+import {
+  createContext,
+  use,
+  useLayoutEffect,
+  useRef,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
+import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { PluggableList } from "unified";
 
+import { useAssetUrlState } from "~/assets/assetUrls";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
-import { projectEnvironment } from "~/state/projects";
+import { noteTextAtom } from "./noteText";
+import { splitFrontmatter } from "./frontmatter";
+import { remarkCallouts } from "./remarkCallouts";
+import { remarkWikilinks } from "./remarkWikilinks";
+import { rehypeNoteAnchors } from "./docsRehype";
+import type { NoteTarget } from "./docsPageContext";
 
 const BASE_REMARK_PLUGINS: PluggableList = [remarkGfm, remarkMath];
-
-/** Drops a leading `---` YAML block; properties are shown by the side panel instead. */
-export function stripFrontmatter(text: string): string {
-  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) return text;
-  const match = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
-  return match ? text.slice(match[0].length) : text;
-}
 
 /** Vault-relative path of a markdown link target, or null for anything that is not a note. */
 export function linkedNotePath(notePath: string, href: string | undefined): string | null {
@@ -45,8 +51,12 @@ export interface DocsNoteProps {
   readonly canGoForward: boolean;
   readonly onBack: () => void;
   readonly onForward: () => void;
-  readonly onOpenNote: (path: string) => void;
-  /** Extra remark plugins appended after GFM and math, for Obsidian syntax. */
+  readonly onOpenNote: (path: string, target?: NoteTarget) => void;
+  /** Every vault note path, used to resolve `[[wikilinks]]`. Empty until the vault loads. */
+  readonly allPaths?: ReadonlyArray<string> | undefined;
+  /** Target to scroll to after the note renders (search hit line or outline heading). */
+  readonly target?: NoteTarget | null | undefined;
+  /** Extra remark plugins appended after GFM and math. */
   readonly remarkPlugins?: PluggableList | undefined;
   /** Overrides for rendered elements; merged over the defaults. */
   readonly components?: Components | undefined;
@@ -61,17 +71,33 @@ export function DocsNote({
   onBack,
   onForward,
   onOpenNote,
+  allPaths,
+  target,
   remarkPlugins,
   components,
 }: DocsNoteProps) {
-  const result = useAtomValue(
-    projectEnvironment.readFile({
-      environmentId,
-      input: { cwd, relativePath: path, allowMissing: true },
-    }),
-  );
-  const plugins = remarkPlugins ? [...BASE_REMARK_PLUGINS, ...remarkPlugins] : BASE_REMARK_PLUGINS;
-  const mergedComponents: Components = { a: NoteLink, ...components };
+  const result = useAtomValue(noteTextAtom(environmentId, cwd, path));
+  const text =
+    AsyncResult.isSuccess(result) && result.value.exists !== false ? result.value.contents : null;
+  const { body } = splitFrontmatter(text ?? "");
+  // Frontmatter is stripped before rendering; offset keeps data-line matching the file's own line numbers.
+  const lineOffset =
+    text === null ? 0 : text.slice(0, text.length - body.length).split("\n").length - 1;
+  // Callouts before wikilinks so `[!type]` is read from unsplit text. GitHub alerts are handled by
+  // remarkCallouts too (bare `[!NOTE]` sets data-callout), so no remarkGithubAlerts here.
+  const plugins: PluggableList = [
+    ...BASE_REMARK_PLUGINS,
+    remarkCallouts,
+    [remarkWikilinks, { allPaths: allPaths ?? [], fromPath: path }],
+    ...(remarkPlugins ?? []),
+  ];
+  const rehypePlugins: PluggableList = [[rehypeNoteAnchors, { lineOffset }]];
+  const mergedComponents: Components = {
+    a: NoteLink,
+    img: NoteImage,
+    blockquote: NoteBlockquote,
+    ...components,
+  };
 
   return (
     <article aria-label="Note" className="flex min-h-0 flex-1 flex-col">
@@ -107,20 +133,59 @@ export function DocsNote({
           <p className="text-muted-foreground text-sm">Loading…</p>
         ) : result.value.exists === false ? (
           <p className="text-muted-foreground text-sm">{path} does not exist.</p>
-        ) : stripFrontmatter(result.value.contents).trim() === "" ? (
+        ) : body.trim() === "" ? (
           <p className="text-muted-foreground text-sm">This note is empty.</p>
         ) : (
-          <NoteContext value={{ notePath: path, onOpenNote }}>
-            <div className="text-sm leading-relaxed">
-              <ReactMarkdown remarkPlugins={plugins} components={mergedComponents}>
-                {stripFrontmatter(result.value.contents)}
-              </ReactMarkdown>
-            </div>
+          <NoteContext value={{ environmentId, cwd, notePath: path, onOpenNote }}>
+            <ScrollToTarget target={target} contentKey={`${path}:${body.length}`}>
+              <div className="text-sm leading-relaxed">
+                <ReactMarkdown
+                  remarkPlugins={plugins}
+                  rehypePlugins={rehypePlugins}
+                  components={mergedComponents}
+                >
+                  {body}
+                </ReactMarkdown>
+              </div>
+            </ScrollToTarget>
           </NoteContext>
         )}
       </div>
     </article>
   );
+}
+
+/** Scrolls to a line (`data-line`) or heading (`id`) once the rendered note changes. */
+function ScrollToTarget({
+  target,
+  contentKey,
+  children,
+}: {
+  readonly target: NoteTarget | null | undefined;
+  readonly contentKey: string;
+  readonly children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- DOM scroll must follow the rendered markdown and the requested target, which only the browser layout knows.
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root || !target) return;
+    if (target.heading) {
+      const heading = root.querySelector<HTMLElement>(`[id="${CSS.escape(target.heading)}"]`);
+      heading?.scrollIntoView({ block: "start" });
+      return;
+    }
+    if (target.line === undefined) return;
+    // ponytail: the nearest block at or above the line; approximate for lines inside lists or code.
+    let best: HTMLElement | null = null;
+    for (const el of root.querySelectorAll<HTMLElement>("[data-line]")) {
+      const line = Number(el.dataset.line);
+      if (line <= target.line) best = el;
+      else break;
+    }
+    best?.scrollIntoView({ block: "center" });
+  }, [target, contentKey]);
+  return <div ref={ref}>{children}</div>;
 }
 
 function Breadcrumbs({ path }: { readonly path: string }) {
@@ -146,25 +211,73 @@ function Breadcrumbs({ path }: { readonly path: string }) {
   );
 }
 
-const NoteContext = createContext<{
+interface NoteContextValue {
+  readonly environmentId: EnvironmentId;
+  readonly cwd: string;
   readonly notePath: string;
-  readonly onOpenNote: (path: string) => void;
-} | null>(null);
+  readonly onOpenNote: (path: string, target?: NoteTarget) => void;
+}
 
-function NoteLink({ href, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) {
+/** Reads a `data-*` attribute that a remark plugin put on the hast node. */
+function dataAttr(props: object, name: string): string | undefined {
+  const value: unknown = (props as Record<string, unknown>)[name];
+  return typeof value === "string" ? value : undefined;
+}
+
+const NoteContext = createContext<NoteContextValue | null>(null);
+
+function NoteLink({
+  href,
+  children,
+  className,
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<"a"> & ExtraProps) {
   const note = use(NoteContext);
-  const target = note ? linkedNotePath(note.notePath, href) : null;
-  if (target !== null) {
+  const wiki = href?.startsWith("#wikilink:") ? parseWikilinkHref(href) : null;
+  if (wiki) {
+    if (dataAttr(props, "data-unresolved") === "true") {
+      return (
+        <span
+          title="Not created yet"
+          className={cn(
+            "text-muted-foreground underline decoration-dashed underline-offset-2",
+            className,
+          )}
+        >
+          {children}
+        </span>
+      );
+    }
     return (
       <a
         {...props}
         href={href}
-        className="text-primary underline underline-offset-2"
+        className={cn("text-primary underline underline-offset-2", className)}
         onClick={(event) => {
           event.preventDefault();
-          note?.onOpenNote(target);
+          note?.onOpenNote(wiki.path, wiki.heading ? { heading: wiki.heading } : undefined);
         }}
-      />
+      >
+        {children}
+      </a>
+    );
+  }
+  const target = note ? linkedNotePath(note.notePath, href) : null;
+  if (note && target !== null) {
+    const anchor = href?.split("#")[1];
+    return (
+      <a
+        {...props}
+        href={href}
+        className={cn("text-primary underline underline-offset-2", className)}
+        onClick={(event) => {
+          event.preventDefault();
+          note.onOpenNote(target, anchor ? { heading: anchor } : undefined);
+        }}
+      >
+        {children}
+      </a>
     );
   }
   return (
@@ -173,7 +286,100 @@ function NoteLink({ href, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-primary underline underline-offset-2"
-    />
+      className={cn("text-primary underline underline-offset-2", className)}
+    >
+      {children}
+    </a>
+  );
+}
+
+/** Parses `#wikilink:<encodedPath>[&h=<encodedHeading>]` as written by remarkWikilinks. */
+function parseWikilinkHref(href: string): { readonly path: string; readonly heading?: string } {
+  const [encodedPath = "", encodedHeading] = href.slice("#wikilink:".length).split("&h=");
+  const path = decodeURIComponent(encodedPath);
+  return encodedHeading === undefined
+    ? { path }
+    : { path, heading: decodeURIComponent(encodedHeading) };
+}
+
+function NoteBlockquote({
+  children,
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<"blockquote"> & ExtraProps) {
+  const callout = dataAttr(props, "data-callout");
+  if (callout === undefined) return <blockquote {...props}>{children}</blockquote>;
+  const title = dataAttr(props, "data-callout-title") ?? callout;
+  return (
+    <blockquote
+      data-callout={callout}
+      className="my-3 rounded-r-md border-primary border-s-4 bg-muted/40 px-3 py-2"
+    >
+      <p className="mb-1 font-medium text-sm">{title}</p>
+      {children}
+    </blockquote>
+  );
+}
+
+/** Obsidian `![[file.png]]` (via remark) and plain markdown images. */
+function NoteImage({
+  src,
+  alt,
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<"img"> & ExtraProps) {
+  const note = use(NoteContext);
+  if (src?.startsWith("#embed:")) {
+    const path = decodeURIComponent(src.slice("#embed:".length));
+    if (dataAttr(props, "data-unresolved") === "true" || note === null) {
+      return <EmbedChip name={alt ?? path} unresolved />;
+    }
+    return (
+      <AssetImage environmentId={note.environmentId} cwd={note.cwd} path={path} alt={alt ?? path} />
+    );
+  }
+  return <img src={src} alt={alt} className="max-w-full" />;
+}
+
+function AssetImage({
+  environmentId,
+  cwd,
+  path,
+  alt,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly cwd: string;
+  readonly path: string;
+  readonly alt: string;
+}) {
+  const state = useAssetUrlState(environmentId, {
+    _tag: "draft-workspace-file",
+    cwd,
+    path,
+  });
+  if (state._tag === "Success") {
+    return <img src={state.url} alt={alt} className="max-w-full rounded-md" />;
+  }
+  return <EmbedChip name={alt} unresolved={state._tag === "Failure"} />;
+}
+
+function EmbedChip({
+  name,
+  unresolved = false,
+}: {
+  readonly name: string;
+  readonly unresolved?: boolean;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-muted-foreground text-xs",
+        unresolved && "border-dashed",
+      )}
+      title={unresolved ? "Not created yet" : name}
+    >
+      <FileIcon aria-hidden className="size-3" />
+      {name}
+    </span>
   );
 }
