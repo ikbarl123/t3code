@@ -40,6 +40,8 @@ export interface ProjectMetaUpdateCommand {
   readonly projectIcon?: ProjectIconOverride | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
   readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
+  readonly docsProjectId?: ProjectId | null;
+  readonly docsGate?: "off" | "warn";
   readonly pinned?: boolean;
   readonly archived?: boolean;
 }
@@ -219,6 +221,8 @@ export function planProjectCommand(input: {
           ...(command.linkedWorkspaces === undefined
             ? {}
             : { linkedWorkspaces: command.linkedWorkspaces }),
+          ...(command.docsProjectId === undefined ? {} : { docsProjectId: command.docsProjectId }),
+          ...(command.docsGate === undefined ? {} : { docsGate: command.docsGate }),
           // Repeating a pin or archive keeps the original time.
           ...(command.pinned === undefined
             ? {}

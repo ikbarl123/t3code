@@ -62,6 +62,8 @@ export const ApplicationProjectMetaUpdatedPayload = Schema.Struct({
   projectIcon: Schema.optional(Schema.NullOr(StoredProjectIcon)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
+  docsProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  docsGate: Schema.optional(Schema.Literals(["off", "warn"])),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   updatedAt: IsoDateTime,

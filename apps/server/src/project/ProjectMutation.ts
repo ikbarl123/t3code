@@ -48,6 +48,8 @@ export const projectMutationOperation = Effect.fn("projectMutationOperation")(fu
         ...(mutation.linkedWorkspaces === undefined
           ? {}
           : { linkedWorkspaces: mutation.linkedWorkspaces }),
+        ...(mutation.docsProjectId === undefined ? {} : { docsProjectId: mutation.docsProjectId }),
+        ...(mutation.docsGate === undefined ? {} : { docsGate: mutation.docsGate }),
         ...(mutation.pinned === undefined ? {} : { pinned: mutation.pinned }),
         ...(mutation.archived === undefined ? {} : { archived: mutation.archived }),
       });
