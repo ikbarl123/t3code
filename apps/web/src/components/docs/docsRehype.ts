@@ -25,7 +25,7 @@ const textOf = (node: Element | Root["children"][number]): string =>
 
 /**
  * Adds `data-line` (full-file line, so `lineOffset` covers frontmatter) to blocks and GitHub-style
- * `id`s to headings. Duplicate headings are counted in document order, matching outline().
+ * `id`s (prefixed `docs-note-` so they cannot collide with app ids) to headings. Duplicate headings are counted in document order, matching outline().
  */
 // ponytail: heading slugs come from rendered text, so headings with inline markup can slug differently from outline(). Fine for plain headings.
 export function rehypeNoteAnchors(options: { readonly lineOffset: number }) {
@@ -41,7 +41,7 @@ export function rehypeNoteAnchors(options: { readonly lineOffset: number }) {
           const base = slugifyHeading(textOf(child));
           const n = seen.get(base) ?? 0;
           seen.set(base, n + 1);
-          child.properties.id = n ? `${base}-${n}` : base;
+          child.properties.id = `docs-note-${n ? `${base}-${n}` : base}`;
         }
         visit(child);
       }

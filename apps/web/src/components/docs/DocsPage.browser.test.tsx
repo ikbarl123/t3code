@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
 import { DocsPage } from "./DocsPage";
@@ -117,10 +117,11 @@ it("lists backlinks grouped by source note and opens the source on click", async
     <DocsPage note="docs/plans/P1.md" onNoteChange={onNoteChange} />,
   );
   // START links to P1 with [[P1]], so P1's backlinks show START with the source line.
-  const aside = screen.container.querySelector<HTMLElement>("aside[aria-label='Note details']");
-  const source = aside?.querySelector<HTMLElement>("button[class*='font-medium']");
-  expect(source?.textContent).toBe("docs/START.md");
-  await userEvent.click(source as HTMLElement);
+  const source = page
+    .getByRole("region", { name: "Backlinks" })
+    .getByRole("button", { name: "docs/START.md", exact: true });
+  await expect.element(source).toBeInTheDocument();
+  await userEvent.click(source.element() as HTMLElement);
   expect(onNoteChange).toHaveBeenLastCalledWith("docs/START.md");
 });
 

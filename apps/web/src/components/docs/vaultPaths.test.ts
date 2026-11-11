@@ -25,6 +25,15 @@ describe("collectMarkdownPaths", () => {
     expect(await collectMarkdownPaths(list)).toEqual(["README.md", "docs/START.md", "docs/x.MD"]);
   });
 
+  it("keeps only direct children of each listed folder", async () => {
+    // The root listing can include indexed descendants; they must not be re-added by the walk.
+    const list = fakeVault({
+      "": [dir("docs"), file("README.md"), file("docs/START.md")],
+      docs: [file("docs/START.md")],
+    });
+    expect(await collectMarkdownPaths(list)).toEqual(["README.md", "docs/START.md"]);
+  });
+
   it("stops at the limit", async () => {
     const list = fakeVault({ "": [file("a.md"), file("b.md"), file("c.md")] });
     expect(await collectMarkdownPaths(list, 2)).toEqual(["a.md", "b.md"]);

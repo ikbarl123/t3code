@@ -5,6 +5,8 @@ export const NOTE_LIMIT = 2000;
 const WALK_CONCURRENCY = 8;
 const SKIPPED_DIRECTORIES = new Set(["node_modules"]);
 
+const parentOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
+
 export type ListDirectory = (
   directoryPath: string | undefined,
 ) => Promise<ReadonlyArray<ProjectEntry>>;
@@ -30,8 +32,11 @@ export async function collectMarkdownPaths(
         }),
       ),
     );
-    for (const entries of listings) {
+    for (const [index, entries] of listings.entries()) {
+      const directory = batch[index] ?? "";
       for (const entry of entries) {
+        // The root call may return indexed descendants; only direct children belong to this folder.
+        if (parentOf(entry.path) !== directory) continue;
         const name = entry.path.slice(entry.path.lastIndexOf("/") + 1);
         if (name.startsWith(".")) continue;
         if (entry.kind === "directory") {

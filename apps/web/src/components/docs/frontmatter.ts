@@ -6,7 +6,7 @@ export interface SplitFrontmatter {
 }
 
 const OPEN = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
-const KEY = /^([A-Za-z_][\w .-]*):(?:[ \t]+(.*))?$/;
+const KEY = /^([\p{L}_][\p{L}\p{N} _.-]*):(?:[ \t]+(.*))?$/u;
 const ITEM = /^\s*-(?:[ \t]+(.*))?$/;
 const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
 
@@ -41,16 +41,19 @@ function parseBlock(lines: string[]): Record<string, FrontmatterValue> {
     if (!line.trim() || line.trimStart().startsWith("#")) continue;
     const item = ITEM.exec(line);
     if (item) {
-      if (key === null) throw new Error("list item without key");
+      // Orphan items and unsupported lines are skipped, not fatal.
+      if (key === null) continue;
       list ??= [];
       list.push(unquote((item[1] ?? "").trim()));
       continue;
     }
+    // Indented lines belong to an unsupported construct (nested map, block scalar); skip them.
+    if (/^\s/.test(line)) continue;
     if (key !== null) out[key] = list;
     key = null;
     list = null;
     const kv = KEY.exec(line);
-    if (!kv) throw new Error(`unparseable line: ${line}`);
+    if (!kv) continue;
     const value = (kv[2] ?? "").trim();
     if (value === "") {
       key = kv[1] ?? null;
@@ -62,14 +65,14 @@ function parseBlock(lines: string[]): Record<string, FrontmatterValue> {
   return out;
 }
 
-// Never throws. Malformed or absent frontmatter yields `{}` and the text unchanged.
+// Never throws. Absent frontmatter leaves the text unchanged; a block that fails to parse is still stripped.
 export function splitFrontmatter(text: string): SplitFrontmatter {
+  const match = OPEN.exec(text);
+  if (!match) return { properties: {}, body: text };
+  const body = text.slice(match[0].length);
   try {
-    const match = OPEN.exec(text);
-    if (!match) return { properties: {}, body: text };
-    const properties = parseBlock((match[1] ?? "").split(/\r?\n/));
-    return { properties, body: text.slice(match[0].length) };
+    return { properties: parseBlock((match[1] ?? "").split(/\r?\n/)), body };
   } catch {
-    return { properties: {}, body: text };
+    return { properties: {}, body };
   }
 }
