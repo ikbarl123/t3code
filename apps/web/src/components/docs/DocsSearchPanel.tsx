@@ -155,6 +155,7 @@ export function DocsSearchPanel({
     [rawMatches, collapsed],
   );
   const fileCount = groups.length;
+  const visibleCount = groups.reduce((total, group) => total + group.matches.length, 0);
   const isStale = query !== debouncedQuery || result.isPending;
   const hasQuery = query.trim().length > 0;
 
@@ -253,9 +254,9 @@ export function DocsSearchPanel({
 
       {hasQuery && !isStale && result.data ? (
         <p className="px-1 text-muted-foreground text-xs" aria-live="polite">
-          {rawMatches.length} {rawMatches.length === 1 ? "result" : "results"} in {fileCount}{" "}
+          {visibleCount} {visibleCount === 1 ? "result" : "results"} in {fileCount}{" "}
           {fileCount === 1 ? "file" : "files"}
-          {result.data.truncated ? ` · Showing first ${rawMatches.length} results` : null}
+          {result.data.truncated ? ` · Showing first ${visibleCount} results` : null}
         </p>
       ) : null}
       {hasQuery && isStale ? (

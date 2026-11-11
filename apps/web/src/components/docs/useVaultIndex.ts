@@ -27,6 +27,9 @@ const EMPTY_SNAPSHOT: VaultSnapshot = { paths: [], index: null, status: "loading
 // Per vault, so every mount of the docs page shares one scan. Module-level on purpose.
 const snapshots = new Map<string, VaultSnapshot>();
 const generations = new Map<string, number>();
+const loadedAt = new Map<string, number>();
+// ponytail: focus rescans only once the cached index is this old; manual refresh() always rescans.
+const FOCUS_RESCAN_MS = 60_000;
 const listeners = new Set<() => void>();
 
 const keyOf = (environmentId: EnvironmentId, cwd: string) => `${environmentId}:${cwd}`;
@@ -53,12 +56,14 @@ async function loadVault(
   const generation = (generations.get(key) ?? 0) + 1;
   generations.set(key, generation);
   const isCurrent = () => generations.get(key) === generation;
+  // A superseded scan stops issuing RPC reads, not just stops publishing.
+  const readIfCurrent = <A, E>(atom: Parameters<typeof executeAtomQuery<A, E>>[1]) =>
+    isCurrent() ? atomValue(registry, atom) : Promise.resolve(null);
   const previous = snapshots.get(key) ?? EMPTY_SNAPSHOT;
   publish(key, { ...previous, status: "loading" });
 
   const listDirectory: ListDirectory = async (directoryPath) => {
-    const listing = await atomValue(
-      registry,
+    const listing = await readIfCurrent(
       projectEnvironment.listEntries({
         environmentId,
         input: { cwd, ...(directoryPath !== undefined ? { directoryPath } : {}) },
@@ -80,8 +85,7 @@ async function loadVault(
   publish(key, { paths, index: null, status: "indexing" });
 
   const texts = await mapConcurrent(paths, READ_CONCURRENCY, async (path) => {
-    const file = await atomValue(
-      registry,
+    const file = await readIfCurrent(
       projectEnvironment.readFile({
         environmentId,
         input: { cwd, relativePath: path, allowMissing: true },
@@ -92,6 +96,7 @@ async function loadVault(
       : ({ path, text: file.contents } as const);
   });
   if (!isCurrent()) return;
+  loadedAt.set(key, Date.now());
   const notes = texts.filter((note): note is NoteInput => note !== null);
   publish(key, { paths, index: buildLinkIndex(notes), status: "ready" });
 }
@@ -119,7 +124,10 @@ export function useVaultIndex(environmentId: EnvironmentId, cwd: string | null):
   useEffect(() => {
     if (cwd === null) return;
     if (!snapshots.has(keyOf(environmentId, cwd))) void loadVault(registry, environmentId, cwd);
-    const onFocus = () => void loadVault(registry, environmentId, cwd);
+    const onFocus = () => {
+      const age = Date.now() - (loadedAt.get(keyOf(environmentId, cwd)) ?? 0);
+      if (age >= FOCUS_RESCAN_MS) void loadVault(registry, environmentId, cwd);
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [registry, environmentId, cwd]);

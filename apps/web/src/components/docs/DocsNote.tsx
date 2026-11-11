@@ -22,18 +22,28 @@ import { noteTextAtom } from "./noteText";
 import { splitFrontmatter } from "./frontmatter";
 import { remarkCallouts } from "./remarkCallouts";
 import { remarkWikilinks } from "./remarkWikilinks";
+import { slugifyHeading } from "./backlinks";
 import { rehypeNoteAnchors } from "./docsRehype";
 import type { NoteTarget } from "./docsPageContext";
 
 const BASE_REMARK_PLUGINS: PluggableList = [remarkGfm, remarkMath];
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
 
 /** Vault-relative path of a markdown link target, or null for anything that is not a note. */
 export function linkedNotePath(notePath: string, href: string | undefined): string | null {
   if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("/") || href.startsWith("#")) {
     return null;
   }
-  const [target] = href.split("#");
-  if (!target || !/\.md$/i.test(target)) return null;
+  const [rawTarget] = href.split("#");
+  if (!rawTarget || !/\.md$/i.test(rawTarget)) return null;
+  const target = rawTarget.split("/").map(decodeSegment).join("/");
   const segments = notePath.split("/").slice(0, -1);
   for (const part of target.split("/")) {
     if (part === "" || part === ".") continue;
@@ -171,7 +181,8 @@ function ScrollToTarget({
     const root = ref.current;
     if (!root || !target) return;
     if (target.heading) {
-      const heading = root.querySelector<HTMLElement>(`[id="${CSS.escape(target.heading)}"]`);
+      const id = `docs-note-${slugifyHeading(target.heading)}`;
+      const heading = root.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"]`);
       heading?.scrollIntoView({ block: "start" });
       return;
     }

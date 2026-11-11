@@ -8,9 +8,19 @@ import { extractTags } from "./tags";
 
 /** Note details for the open note: properties, tags, outline, backlinks and outgoing links. */
 export function DocsSidePanel() {
-  const { activePath, activeText, vault, openNote } = useDocsPage();
+  const { activePath, activeText, noteStatus, vault, openNote } = useDocsPage();
   if (activePath === null) {
     return <p className="text-muted-foreground text-sm">Open a note to see its details.</p>;
+  }
+  if (noteStatus === "missing") {
+    return <p className="text-muted-foreground text-sm">Note not found.</p>;
+  }
+  if (noteStatus === "error") {
+    return (
+      <p role="alert" className="text-destructive text-sm">
+        Could not read note.
+      </p>
+    );
   }
   if (activeText === null) {
     return <p className="text-muted-foreground text-sm">Loading…</p>;
@@ -138,8 +148,8 @@ function BacklinkGroups({
             {from}
           </button>
           <ul className="mt-1 flex flex-col gap-1">
-            {links.map((link) => (
-              <li key={`${link.from}:${link.line}`}>
+            {links.map((link, index) => (
+              <li key={`${link.line}:${index}`}>
                 <button
                   type="button"
                   className="w-full truncate rounded-sm px-1 py-0.5 text-start text-muted-foreground text-xs hover:bg-accent"

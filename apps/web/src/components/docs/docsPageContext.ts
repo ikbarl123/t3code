@@ -9,12 +9,15 @@ export interface NoteTarget {
   readonly heading?: string;
 }
 
+export type NoteStatus = "loading" | "ready" | "missing" | "error";
+
 export interface DocsPageControls {
   readonly openNote: (path: string, target?: NoteTarget) => void;
   readonly closeSearch: () => void;
   readonly activePath: string | null;
   /** Full note text including frontmatter; null while loading or when absent. */
   readonly activeText: string | null;
+  readonly noteStatus: NoteStatus;
   readonly vault: {
     readonly paths: ReadonlyArray<string>;
     readonly index: LinkIndex | null;

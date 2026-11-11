@@ -36,8 +36,28 @@ describe("splitFrontmatter", () => {
     });
   });
 
-  it("never throws on malformed frontmatter", () => {
+  it("skips unsupported lines and still strips the block", () => {
+    const text = [
+      "---",
+      "parent:",
+      "  child: 1",
+      "desc: >",
+      "  folded text",
+      "título: Olá",
+      ": : :",
+      "tags:",
+      "  - x",
+      "---",
+      "body",
+    ].join("\n");
+    expect(splitFrontmatter(text)).toEqual({
+      properties: { parent: null, desc: ">", título: "Olá", tags: ["x"] },
+      body: "body",
+    });
+  });
+
+  it("strips a malformed block from the body without leaking YAML", () => {
     const text = "---\n: : :\n  stray indent\n---\nbody";
-    expect(splitFrontmatter(text)).toEqual({ properties: {}, body: text });
+    expect(splitFrontmatter(text)).toEqual({ properties: {}, body: "body" });
   });
 });

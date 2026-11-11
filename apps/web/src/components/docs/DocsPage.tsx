@@ -18,7 +18,12 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { useStableCallback } from "~/hooks/useStableCallback";
-import { DocsPageProvider, type DocsPageControls, type NoteTarget } from "./docsPageContext";
+import {
+  DocsPageProvider,
+  type DocsPageControls,
+  type NoteStatus,
+  type NoteTarget,
+} from "./docsPageContext";
 import { docsProjectRefs } from "./docsProjects";
 import { DocsNote } from "./DocsNote";
 import { DocsQuickSwitcher } from "./DocsQuickSwitcher";
@@ -68,7 +73,11 @@ export function DocsPage(props: DocsPageProps) {
               ]),
             )
           }
-          onSelectProject={(ref) => setSelectedKey(scopedProjectKey(ref))}
+          onSelectProject={(ref) => {
+            setSelectedKey(scopedProjectKey(ref));
+            // The note belongs to the old vault; the remounted workspace starts with empty history.
+            props.onNoteChange(null);
+          }}
         />
       ) : (
         <p className="p-6 text-muted-foreground text-sm">
@@ -79,15 +88,18 @@ export function DocsPage(props: DocsPageProps) {
   );
 }
 
-/** Note text for the side panel and context; null while loading, missing, or with no note open. */
-function useActiveNoteText(
+/** Note text and read state for the side panel and context. Text is null unless status is `ready`. */
+function useActiveNote(
   projectRef: ScopedProjectRef,
   cwd: string | null,
   note: string | null,
-): string | null {
-  const noteResult = useAtomValue(noteTextAtom(projectRef.environmentId, cwd ?? "", note ?? ""));
-  if (note === null || cwd === null || !AsyncResult.isSuccess(noteResult)) return null;
-  return noteResult.value.exists === false ? null : noteResult.value.contents;
+): { readonly text: string | null; readonly status: NoteStatus } {
+  const noteResult = useAtomValue(noteTextAtom(projectRef.environmentId, cwd, note));
+  if (note === null || cwd === null) return { text: null, status: "loading" };
+  if (AsyncResult.isFailure(noteResult)) return { text: null, status: "error" };
+  if (!AsyncResult.isSuccess(noteResult)) return { text: null, status: "loading" };
+  if (noteResult.value.exists === false) return { text: null, status: "missing" };
+  return { text: noteResult.value.contents, status: "ready" };
 }
 
 /** Re-reads the open note from disk; a no-op until a note and vault are both known. */
@@ -96,9 +108,18 @@ function useActiveNoteRefresh(
   cwd: string | null,
   note: string | null,
 ): () => void {
-  const refresh = useAtomRefresh(noteTextAtom(projectRef.environmentId, cwd ?? "", note ?? ""));
+  const refresh = useAtomRefresh(noteTextAtom(projectRef.environmentId, cwd, note));
   return () => {
     if (note !== null && cwd !== null) refresh();
+  };
+}
+
+/** Pushes a note that is not already the current entry; the back/forward step moves the index itself. */
+function pushVisit(history: History, path: string): History {
+  if (history.entries[history.index] === path) return history;
+  return {
+    entries: [...history.entries.slice(0, history.index + 1), path],
+    index: history.index + 1,
   };
 }
 
@@ -128,17 +149,18 @@ function DocsWorkspace({
   const [history, setHistory] = useState<History>(() =>
     note ? { entries: [note], index: 0 } : { entries: [], index: -1 },
   );
+  // Any note change not made by step() (a link, the quick switcher, a pasted URL) becomes a new visit.
+  const [seenNote, setSeenNote] = useState(note);
+  if (note !== seenNote) {
+    setSeenNote(note);
+    if (note !== null) setHistory((previous) => pushVisit(previous, note));
+  }
   const canGoBack = history.index > 0;
   const canGoForward = history.index >= 0 && history.index < history.entries.length - 1;
 
   const openNote = useStableCallback((path: string, next?: NoteTarget) => {
     setTarget(next ?? null);
-    if (path === note) return;
-    setHistory((previous) => ({
-      entries: [...previous.entries.slice(0, previous.index + 1), path],
-      index: previous.index + 1,
-    }));
-    onNoteChange(path);
+    if (path !== note) onNoteChange(path);
   });
   const step = useStableCallback((delta: -1 | 1) => {
     const next = history.index + delta;
@@ -154,7 +176,7 @@ function DocsWorkspace({
   const closeSearch = useStableCallback(() => setSearchOpen(false));
 
   // The note is read once here; DocsNote and the side panel both read the same cached atom.
-  const activeText = useActiveNoteText(projectRef, cwd, note);
+  const { text: activeText, status: noteStatus } = useActiveNote(projectRef, cwd, note);
   const refreshNote = useActiveNoteRefresh(projectRef, cwd, note);
   // useVaultIndex already reloads the vault on focus; the open note is re-read here.
   const refreshNoteOnFocus = useStableCallback(() => refreshNote());
@@ -182,6 +204,11 @@ function DocsWorkspace({
         setSwitcherOpen((open) => !open);
         return;
       }
+      const target = event.target;
+      const editing =
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+      if (editing) return;
       if (event.altKey && !modified && !event.shiftKey && event.key === "ArrowLeft") {
         event.preventDefault();
         step(-1);
@@ -199,6 +226,7 @@ function DocsWorkspace({
     closeSearch,
     activePath: note,
     activeText,
+    noteStatus,
     vault: { paths: vault.paths, index: vault.index, status: vault.status },
   };
   const searchSlot =
