@@ -76,6 +76,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.guestShareCreate]: AuthAccessWriteScope,
   // Toggling writes the plan file in the docs vault.
   [WS_METHODS.planToggleMilestone]: AuthOrchestrationOperateScope,
+  [WS_METHODS.planRead]: AuthOrchestrationReadScope,
+  [WS_METHODS.planDriftCheck]: AuthOrchestrationReadScope,
   [WS_METHODS.peerLinksLink]: AuthAccessWriteScope,
   [WS_METHODS.peerLinksUnlink]: AuthAccessWriteScope,
   // A link lets every agent here reach the other environment: Settings' bar.

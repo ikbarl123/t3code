@@ -42,6 +42,8 @@ export const projectMutationOperation = Effect.fn("projectMutationOperation")(fu
           ? {}
           : { defaultThreadEnvMode: mutation.defaultThreadEnvMode }),
         ...(mutation.scripts === undefined ? {} : { scripts: mutation.scripts }),
+        ...(mutation.docsProjectId === undefined ? {} : { docsProjectId: mutation.docsProjectId }),
+        ...(mutation.docsGate === undefined ? {} : { docsGate: mutation.docsGate }),
         ...(mutation.pinned === undefined ? {} : { pinned: mutation.pinned }),
         ...(mutation.archived === undefined ? {} : { archived: mutation.archived }),
       });
