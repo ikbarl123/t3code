@@ -10,6 +10,7 @@ import {
   OrchestrationV2ProviderThreadJson,
   OrchestrationV2RpcSchemas,
   OrchestrationV2Subagent,
+  OrchestrationV2DomainEventJson,
   OrchestrationV2ThreadShellJson,
   OrchestrationV2SubagentJson,
   OrchestrationV2ThreadHistoryPage,
@@ -484,6 +485,58 @@ describe("thread open stats", () => {
     const opens = { openedAt: 1, score: 1, picks: [{ query: "upl", at: 1 }] };
     expect(decode({ ...shell, opens }).opens).toEqual(opens);
     expect(decode({ ...shell, opens: { openedAt: "2026-10-01", score: 1 } }).opens).toBeNull();
+  });
+});
+
+describe("plan binding fields from older payloads", () => {
+  const shell = {
+    id: "thread-test",
+    projectId: "project-test",
+    title: "Thread",
+    providerInstanceId: "codex",
+    modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    activeProviderThreadId: null,
+    lineage: { rootThreadId: "thread-test", parentThreadId: null, relationshipToParent: null },
+    forkedFrom: null,
+    createdBy: "user",
+    creationSource: "mobile",
+    latestRunId: null,
+    activeRunId: null,
+    status: "idle",
+    pendingRuntimeRequest: null,
+    latestVisibleMessage: null,
+    latestUserMessageAt: null,
+    hasActionableProposedPlan: false,
+    itemCount: 0,
+    visibleItemCount: 0,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    deletedAt: null,
+  };
+
+  it("decodes a thread shell without planPath as unbound", () => {
+    const decode = Schema.decodeUnknownSync(OrchestrationV2ThreadShellJson);
+    expect(decode(shell).planPath).toBeUndefined();
+    expect(decode({ ...shell, planPath: "docs/plans/x.md" }).planPath).toBe("docs/plans/x.md");
+  });
+
+  it("decodes a plan-unbound event whose thread payload predates planPath", () => {
+    const decodeEvent = Schema.decodeUnknownSync(OrchestrationV2DomainEventJson);
+    const event = decodeEvent({
+      id: "event-1",
+      threadId: "thread-test",
+      occurredAt: "2026-10-01T00:00:00.000Z",
+      type: "thread.plan-unbound",
+      payload: { ...shell, createdAt: shell.createdAt, updatedAt: shell.updatedAt },
+    });
+    expect(event.type).toBe("thread.plan-unbound");
   });
 });
 

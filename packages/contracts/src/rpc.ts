@@ -164,6 +164,14 @@ import {
 import { KeybindingsConfigError } from "./keybindings.ts";
 import { OrchestrationSearchThreadsError } from "./threadSearch.ts";
 import {
+  DriftItem,
+  PlanDriftCheckInput,
+  PlanError,
+  PlanReadInput,
+  PlanToggleMilestoneInput,
+  PlanView,
+} from "./plan.ts";
+import {
   ProviderUploadFeedbackError,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -519,6 +527,9 @@ export const WS_METHODS = {
   serverGetStorageCleanupReport: "server.getStorageCleanupReport",
   serverGetDatabaseStorage: "server.getDatabaseStorage",
   serverReclaimDatabaseSpace: "server.reclaimDatabaseSpace",
+  planRead: "plan.read",
+  planToggleMilestone: "plan.toggleMilestone",
+  planDriftCheck: "plan.driftCheck",
   peerLinksList: "peerLinks.list",
   peerLinksLink: "peerLinks.link",
   peerLinksUnlink: "peerLinks.unlink",
@@ -838,6 +849,26 @@ const WsServerGetDatabaseStorageRpc = Rpc.make(WS_METHODS.serverGetDatabaseStora
 const WsServerReclaimDatabaseSpaceRpc = Rpc.make(WS_METHODS.serverReclaimDatabaseSpace, {
   payload: Schema.Struct({}),
   error: Schema.Union([DatabaseReclaimError, EnvironmentAuthorizationError]),
+});
+
+const PlanRpcError = Schema.Union([PlanError, EnvironmentAuthorizationError]);
+
+const WsPlanReadRpc = Rpc.make(WS_METHODS.planRead, {
+  payload: PlanReadInput,
+  success: PlanView,
+  error: PlanRpcError,
+});
+
+const WsPlanToggleMilestoneRpc = Rpc.make(WS_METHODS.planToggleMilestone, {
+  payload: PlanToggleMilestoneInput,
+  success: PlanView,
+  error: PlanRpcError,
+});
+
+const WsPlanDriftCheckRpc = Rpc.make(WS_METHODS.planDriftCheck, {
+  payload: PlanDriftCheckInput,
+  success: Schema.Array(DriftItem),
+  error: PlanRpcError,
 });
 
 const WsPeerLinksListRpc = Rpc.make(WS_METHODS.peerLinksList, {
@@ -2122,6 +2153,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetDatabaseStorageRpc,
   WsServerReclaimDatabaseSpaceRpc,
   WsServerUpdateSettingsRpc,
+  WsPlanReadRpc,
+  WsPlanToggleMilestoneRpc,
+  WsPlanDriftCheckRpc,
   WsPeerLinksListRpc,
   WsPeerLinksLinkRpc,
   WsPeerLinksUnlinkRpc,
