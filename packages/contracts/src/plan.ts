@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { ThreadId, TrimmedNonEmptyString, TurnId } from "./baseSchemas.ts";
+import { RunId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const PlanMilestone = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -31,7 +31,7 @@ export const DriftItem = Schema.Struct({
 });
 export type DriftItem = typeof DriftItem.Type;
 
-export const PlanDriftCheckInput = Schema.Struct({ threadId: ThreadId, turnId: TurnId });
+export const PlanDriftCheckInput = Schema.Struct({ threadId: ThreadId, turnId: RunId });
 
 export class PlanError extends Schema.TaggedError<PlanError>()("PlanError", {
   reason: Schema.Literals(["not_bound", "milestone_not_found", "plan_unreadable"]),

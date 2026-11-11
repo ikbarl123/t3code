@@ -64,6 +64,7 @@ import { useClientSettings, updateClientSettings } from "../hooks/useSettings";
 import { formatRelativeTimeLabel, formatShortTimestamp } from "../timestampFormat";
 import { DiffFilePathCopyButton } from "./DiffFilePathCopyButton";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import { DocsDriftSection } from "./DocsDriftSection";
 import { DiffStatLabel } from "./chat/DiffStatLabel";
 import { AnnotatableCodeView } from "./diffs/AnnotatableCodeView";
 import { DiffFileTree } from "./diffs/DiffFileTree";
@@ -262,7 +263,8 @@ export default function DiffPanel({
     ? [
         {
           id: "primary",
-          label: activeProject?.title ?? (primaryCwd.split(/[\\/]/).filter(Boolean).pop() ?? "Primary"),
+          label:
+            activeProject?.title ?? primaryCwd.split(/[\\/]/).filter(Boolean).pop() ?? "Primary",
           workspaceRoot: primaryCwd,
           repositoryIdentity: activeProject?.repositoryIdentity,
         },
@@ -423,9 +425,9 @@ export default function DiffPanel({
       ? activeThread?.worktreePath
         ? primaryCwd
         : activeProject?.repositoryIdentity?.rootPath
-      : (selectedOwningRepo && "repositoryIdentity" in selectedOwningRepo
+      : ((selectedOwningRepo && "repositoryIdentity" in selectedOwningRepo
           ? selectedOwningRepo.repositoryIdentity?.rootPath
-          : undefined) ?? selectedCommitCwd;
+          : undefined) ?? selectedCommitCwd);
   const gitStatusQuery = useEnvironmentQuery(
     activeThread !== null && activeThread !== undefined && selectedCommitCwd != null
       ? vcsEnvironment.status({
@@ -517,14 +519,12 @@ export default function DiffPanel({
       ? projectRepos.find((repo) => repo.workspaceRoot === selectedCommitCwd)
       : undefined;
   const selectedCommitRepoIdentity = selectedCommitOwningRepo
-    ? ("repositoryIdentity" in selectedCommitOwningRepo
-        ? selectedCommitOwningRepo.repositoryIdentity
-        : undefined)
+    ? "repositoryIdentity" in selectedCommitOwningRepo
+      ? selectedCommitOwningRepo.repositoryIdentity
+      : undefined
     : activeProject?.repositoryIdentity;
   const selectedCommitUrl =
-    headerCommitSha !== null
-      ? projectCommitUrl(selectedCommitRepoIdentity, headerCommitSha)
-      : null;
+    headerCommitSha !== null ? projectCommitUrl(selectedCommitRepoIdentity, headerCommitSha) : null;
   const openLink = useOpenLink(routeThreadRef);
   // A SHA link goes to the code host; it must not route back into this pane's commit selection.
   const openCommitUrl = (event: MouseEvent<HTMLElement>, url: string) => {
@@ -558,7 +558,9 @@ export default function DiffPanel({
   const isLoadingSelectedPatch =
     (selectedPatchQuery.isPending &&
       (selectedPatchQuery.data === null ||
-        (isGitSelection && preview?.incomplete === true && selectedGitSource?.files?.length === 0))) ||
+        (isGitSelection &&
+          preview?.incomplete === true &&
+          selectedGitSource?.files?.length === 0))) ||
     (isGitSelection && awaitingCommitRepo);
   const selectedPatchError = toolCallSelection
     ? toolCallDetail.error
@@ -992,7 +994,9 @@ export default function DiffPanel({
           <DropdownMenuContent align="start">
             <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
               <DropdownMenuRadioItem value="branch" closeOnClick>
-                <span>{hasMultipleRepos && !resolvedSelectedRepo ? "Changes (Primary)" : "Changes"}</span>
+                <span>
+                  {hasMultipleRepos && !resolvedSelectedRepo ? "Changes (Primary)" : "Changes"}
+                </span>
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="unstaged" closeOnClick>
                 <span>
@@ -1048,9 +1052,9 @@ export default function DiffPanel({
                       ? projectRepos.find((repo) => repo.workspaceRoot === commit.cwd)
                       : resolvedSelectedRepo;
                     const commitRepoIdentity = commitOwningRepo
-                      ? ("repositoryIdentity" in commitOwningRepo
-                          ? commitOwningRepo.repositoryIdentity
-                          : undefined)
+                      ? "repositoryIdentity" in commitOwningRepo
+                        ? commitOwningRepo.repositoryIdentity
+                        : undefined
                       : activeProject?.repositoryIdentity;
                     const commitUrl = projectCommitUrl(commitRepoIdentity, commit.sha);
                     return (
@@ -1452,6 +1456,13 @@ export default function DiffPanel({
         )
       ) : (
         <>
+          {selectedTurn && activeThread && routeThreadRef && activeThread.planPath ? (
+            <DocsDriftSection
+              environmentId={activeThread.environmentId}
+              threadId={routeThreadRef.threadId}
+              turnId={selectedTurn.runId}
+            />
+          ) : null}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
             {preview?.incomplete && (
               <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground">

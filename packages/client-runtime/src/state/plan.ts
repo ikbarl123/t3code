@@ -1,4 +1,4 @@
-import { WS_METHODS, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
+import { WS_METHODS, type EnvironmentId, type RunId, type ThreadId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 
 import { requestGuarded } from "../rpc/client.ts";
@@ -21,16 +21,26 @@ export function createPlanEnvironmentAtoms<R, E>(
       execute: (input: { readonly threadId: ThreadId }) =>
         requestGuarded(WS_METHODS.planRead, input),
     }),
+    driftCheck: createEnvironmentQueryAtomFamily(runtime, {
+      label: "environment-data:plan:drift-check",
+      staleTimeMs: 5_000,
+      execute: (input: { readonly threadId: ThreadId; readonly turnId: RunId }) =>
+        requestGuarded(WS_METHODS.planDriftCheck, input),
+    }),
     toggleMilestone: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:plan:toggle-milestone",
       tag: WS_METHODS.planToggleMilestone,
       scheduler,
       concurrency: {
         mode: "serial",
-        key: ({ environmentId, input }: { environmentId: EnvironmentId; input: { threadId: ThreadId } }) =>
-          JSON.stringify([environmentId, input.threadId]),
+        key: ({
+          environmentId,
+          input,
+        }: {
+          environmentId: EnvironmentId;
+          input: { threadId: ThreadId };
+        }) => JSON.stringify([environmentId, input.threadId]),
       },
     }),
   };
 }
-

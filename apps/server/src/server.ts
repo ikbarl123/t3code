@@ -130,6 +130,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as DriftService from "./plan/DriftService.ts";
 import * as PlanService from "./plan/PlanService.ts";
 import * as DocsContextService from "./plan/DocsContextService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
@@ -567,6 +568,13 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
 );
 
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
+  // Optional dependency of ProviderTurnStartService, so it must be provided inside this layer.
+  Layer.provide(
+    DocsContextService.layer.pipe(
+      Layer.provide(RuntimeLayer.layerProjectService),
+      Layer.provide(layerWorkspaceFileSystem),
+    ),
+  ),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderUsageAnalytics.layer),
   Layer.provide(layerCheckpointStore),
@@ -646,7 +654,7 @@ const layerServerRestart = Layer.effect(
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   PlanService.layer,
-  DocsContextService.layer,
+  DriftService.layer,
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,
