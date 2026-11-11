@@ -476,9 +476,7 @@ function ProjectDetail({
       return false;
     }
     const inferredLabel =
-      desiredLabel?.trim() ||
-      trimmedPath.split(/[\\/]/).filter(Boolean).pop() ||
-      "repo";
+      desiredLabel?.trim() || trimmedPath.split(/[\\/]/).filter(Boolean).pop() || "repo";
     const id = `${inferredLabel.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}-${Date.now().toString(36)}`;
     const newEntry: ProjectLinkedWorkspace = {
       id,
@@ -575,7 +573,11 @@ function ProjectDetail({
             disabled={!canEditGroup}
           >
             <SelectTrigger size="sm" className="w-full sm:w-64" aria-label="Docs project">
-              <SelectValue />
+              <SelectValue>
+                {docsProjectCandidates.find(
+                  (project) => project.id === representative.docsProjectId,
+                )?.title ?? "None"}
+              </SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
               <SelectItem hideIndicator value="none">
@@ -608,7 +610,7 @@ function ProjectDetail({
               disabled={!canEditGroup}
             >
               <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Docs gate">
-                <SelectValue />
+                <SelectValue>{representative.docsGate === "off" ? "Off" : "Warn"}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="warn">
@@ -628,7 +630,9 @@ function ProjectDetail({
   const linkedRepositoriesSection = (
     <SettingsSection id="project-linked-repositories" title="Linked Repositories">
       <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
-        Attach additional Git repositories (for example microservices when this project is a centralized docs vault) so turn checkpoints, rollbacks, diffs, and commit history track every repository together.
+        Attach additional Git repositories (for example microservices when this project is a
+        centralized docs vault) so turn checkpoints, rollbacks, diffs, and commit history track
+        every repository together.
       </p>
       {currentLinkedWorkspaces.map((repo) => (
         <SettingsRow
@@ -660,7 +664,11 @@ function ProjectDetail({
                 onValueChange={(val) => setSelectedProjectRootToImport(val ?? "")}
                 disabled={!canEditGroup || isSavingLinkedRepos}
               >
-                <SelectTrigger size="sm" className="w-full sm:w-64" aria-label="Select existing project to link">
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-64"
+                  aria-label="Select existing project to link"
+                >
                   <SelectValue placeholder="Choose a project..." />
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
