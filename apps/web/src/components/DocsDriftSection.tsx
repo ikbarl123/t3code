@@ -19,6 +19,13 @@ function DriftItems({
     planEnvironment.driftCheck({ environmentId, input: { threadId, turnId } }),
   );
   const items = AsyncResult.getOrElse(result, () => null);
+  if (AsyncResult.isFailure(result)) {
+    return (
+      <p role="alert" className="text-destructive-foreground text-xs">
+        Could not check docs drift.
+      </p>
+    );
+  }
   if (items === null) return <p className="text-muted-foreground text-xs">Checking docs…</p>;
   if (items.length === 0) return <p className="text-muted-foreground text-xs">No drift.</p>;
   return (
