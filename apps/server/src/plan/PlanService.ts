@@ -39,7 +39,7 @@ const progressSection = (lines: ReadonlyArray<string>) => {
 };
 
 export const parsePlan = (text: string): PlanView => {
-  const lines = text.split("\n");
+  const lines = text.split(/\r?\n/);
   const milestones = lines.flatMap((line) => {
     const match = MILESTONE_LINE.exec(line);
     return match === null ? [] : [{ id: match[2]!, text: match[3]!, done: match[1] !== " " }];
@@ -61,7 +61,19 @@ export const parsePlan = (text: string): PlanView => {
 };
 
 /** Returns undefined when the milestone id is absent. Returns `text` unchanged when already in that state. */
+/** Edits a plan, preserving CRLF line endings when the file uses them. */
 export const setMilestone = (
+  text: string,
+  id: string,
+  done: boolean,
+  date: string,
+): string | undefined => {
+  if (!text.includes("\r\n")) return setMilestoneLf(text, id, done, date);
+  const next = setMilestoneLf(text.replace(/\r\n/g, "\n"), id, done, date);
+  return next === undefined ? undefined : next.replace(/\n/g, "\r\n");
+};
+
+const setMilestoneLf = (
   text: string,
   id: string,
   done: boolean,
