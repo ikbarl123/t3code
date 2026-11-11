@@ -615,6 +615,30 @@ export const reorderActiveThread = Effect.fn("EnvironmentCommands.reorderActiveT
   });
 });
 
+export interface BindThreadPlanInput extends ThreadCommandInput {
+  readonly planPath: string;
+}
+export const bindThreadPlan = Effect.fn("EnvironmentCommands.bindThreadPlan")(function* (
+  input: BindThreadPlanInput,
+) {
+  return yield* dispatch({
+    type: "thread.plan.bind",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    planPath: input.planPath,
+  });
+});
+
+export const unbindThreadPlan = Effect.fn("EnvironmentCommands.unbindThreadPlan")(function* (
+  input: ThreadCommandInput,
+) {
+  return yield* dispatch({
+    type: "thread.plan.unbind",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+  });
+});
+
 export const unpinThread = Effect.fn("EnvironmentCommands.unpinThread")(function* (
   input: UnpinThreadInput,
 ) {

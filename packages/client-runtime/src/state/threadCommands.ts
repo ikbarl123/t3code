@@ -25,6 +25,8 @@ import {
   type InterruptThreadTurnInput,
   type UpdateThreadMetadataInput,
   archiveThread,
+  bindThreadPlan,
+  unbindThreadPlan,
   closeGuestShare,
   resolveGuestMessage,
   cancelQueuedRun,
@@ -229,6 +231,18 @@ export function createThreadEnvironmentAtoms<R, E>(
     unpin: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:unpin",
       execute: unpinThread,
+      scheduler,
+      concurrency,
+    }),
+    bindPlan: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:bind-plan",
+      execute: bindThreadPlan,
+      scheduler,
+      concurrency,
+    }),
+    unbindPlan: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:unbind-plan",
+      execute: unbindThreadPlan,
       scheduler,
       concurrency,
     }),
