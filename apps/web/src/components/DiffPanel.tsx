@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { DocsDriftSection } from "./DocsDriftSection";
 import { useCodeViewFileReveal } from "./diffs/useCodeViewFileReveal";
 import { useCodeViewScrollRestore } from "./diffs/useCodeViewScrollRestore";
 import { useFilesystemReadAccess } from "~/state/filesystem";
@@ -1321,6 +1322,13 @@ export default function DiffPanel({
         )
       ) : (
         <>
+          {selectedTurn && activeThread && routeThreadRef && activeThread.planPath ? (
+            <DocsDriftSection
+              environmentId={activeThread.environmentId}
+              threadId={routeThreadRef.threadId}
+              turnId={selectedTurn.runId}
+            />
+          ) : null}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
             {preview?.incomplete && (
               <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground">
