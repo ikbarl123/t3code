@@ -5,8 +5,10 @@ import { render } from "../../../test/render";
 import { DocsPage } from "./DocsPage";
 
 const files: Record<string, string> = {
-  "docs/START.md": "---\ntitle: Start\n---\n# Start\n\n[Plans](plans/P1.md)",
-  "docs/plans/P1.md": "# Plan one\n\nBody text.",
+  "docs/START.md":
+    "---\ntitle: Start\ntags: [home]\nstatus: active\n---\n# Start\n\n[Plans](plans/P1.md)\n\nSee [[P1]] and [[Missing Note]].\n\n## Details\n\nNote text.\n\n> [!warning] Careful\n> watch out",
+  "docs/plans/P1.md": "# Plan one\n\nBody text. Back to [[START#Details]].",
+  "docs/plans/P2.md": "# Plan two\n\nUnrelated.",
 };
 const directories: Record<string, ReadonlyArray<{ path: string; kind: "file" | "directory" }>> = {
   "": [
@@ -18,13 +20,18 @@ const directories: Record<string, ReadonlyArray<{ path: string; kind: "file" | "
     { path: "docs/plans", kind: "directory" },
     { path: "docs/notes.txt", kind: "file" },
   ],
-  "docs/plans": [{ path: "docs/plans/P1.md", kind: "file" }],
+  "docs/plans": [
+    { path: "docs/plans/P1.md", kind: "file" },
+    { path: "docs/plans/P2.md", kind: "file" },
+  ],
 };
 
 vi.mock("~/state/projects", async () => {
   const { AsyncResult, Atom } = await import("effect/reactivity");
   const ok = (value: unknown) => Atom.make(AsyncResult.success(value));
   return {
+    // Content search is not exercised here; an empty result keeps DocsSearchSlot inert.
+    projectContentSearch: () => ok({ matches: [], truncated: false }),
     projectEnvironment: {
       listEntries: ({ input }: { input: { directoryPath?: string } }) =>
         ok({ entries: directories[input.directoryPath ?? ""] ?? [], truncated: false }),
@@ -41,6 +48,11 @@ vi.mock("~/state/projects", async () => {
     },
   };
 });
+
+// Image embeds read asset URLs; the real hook reaches the connection runtime, which tests do not run.
+vi.mock("~/assets/assetUrls", () => ({
+  useAssetUrlState: () => ({ _tag: "Loading" }),
+}));
 
 // The code project links to a docs project; DocsPage resolves the vault from that link.
 vi.mock("~/state/entities", () => {
@@ -87,4 +99,46 @@ it("follows a relative markdown link inside the vault", async () => {
   await using screen = await render(<DocsPage note="docs/START.md" onNoteChange={onNoteChange} />);
   await userEvent.click(screen.getByRole("link", { name: "Plans" }).element() as HTMLElement);
   expect(onNoteChange).toHaveBeenLastCalledWith("docs/plans/P1.md");
+});
+
+it("navigates a wikilink to an existing note and styles a missing one as not created", async () => {
+  const onNoteChange = vi.fn();
+  await using screen = await render(<DocsPage note="docs/START.md" onNoteChange={onNoteChange} />);
+  await userEvent.click(screen.getByRole("link", { name: "P1" }).element() as HTMLElement);
+  expect(onNoteChange).toHaveBeenLastCalledWith("docs/plans/P1.md");
+  await expect
+    .element(screen.getByText("Missing Note"))
+    .toHaveAttribute("title", "Not created yet");
+});
+
+it("lists backlinks grouped by source note and opens the source on click", async () => {
+  const onNoteChange = vi.fn();
+  await using screen = await render(
+    <DocsPage note="docs/plans/P1.md" onNoteChange={onNoteChange} />,
+  );
+  // START links to P1 with [[P1]], so P1's backlinks show START with the source line.
+  const aside = screen.container.querySelector<HTMLElement>("aside[aria-label='Note details']");
+  const source = aside?.querySelector<HTMLElement>("button[class*='font-medium']");
+  expect(source?.textContent).toBe("docs/START.md");
+  await userEvent.click(source as HTMLElement);
+  expect(onNoteChange).toHaveBeenLastCalledWith("docs/START.md");
+});
+
+it("opens the quick switcher with Ctrl+O and opens the selected note", async () => {
+  const onNoteChange = vi.fn();
+  await using screen = await render(<DocsPage note={null} onNoteChange={onNoteChange} />);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "o", ctrlKey: true }));
+  await expect.element(screen.getByPlaceholder("Open note…")).toBeInTheDocument();
+  await userEvent.keyboard("p2");
+  await userEvent.keyboard("{Enter}");
+  expect(onNoteChange).toHaveBeenLastCalledWith("docs/plans/P2.md");
+});
+
+it("opens the vault search panel with Ctrl+Shift+F", async () => {
+  await using screen = await render(<DocsPage note={null} onNoteChange={() => {}} />);
+  expect(screen.container.querySelector("[aria-label='Search vault contents']")).toBeNull();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "F", ctrlKey: true, shiftKey: true }));
+  await expect
+    .element(screen.getByRole("textbox", { name: "Search vault contents" }))
+    .toBeInTheDocument();
 });

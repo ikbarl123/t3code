@@ -1,9 +1,25 @@
 import { createContext, use } from "react";
 
+import type { LinkIndex } from "./backlinks";
+import type { VaultStatus } from "./useVaultIndex";
+
+/** Where to land inside a note: a 1-based source line (search hits) or a heading slug (outline, `[[x#h]]`). */
+export interface NoteTarget {
+  readonly line?: number;
+  readonly heading?: string;
+}
+
 export interface DocsPageControls {
-  /** Opens a vault-relative note; `line` is reserved for search results and not scrolled to yet. */
-  readonly openNote: (path: string, line?: number) => void;
+  readonly openNote: (path: string, target?: NoteTarget) => void;
   readonly closeSearch: () => void;
+  readonly activePath: string | null;
+  /** Full note text including frontmatter; null while loading or when absent. */
+  readonly activeText: string | null;
+  readonly vault: {
+    readonly paths: ReadonlyArray<string>;
+    readonly index: LinkIndex | null;
+    readonly status: VaultStatus;
+  };
 }
 
 const DocsPageContext = createContext<DocsPageControls | null>(null);

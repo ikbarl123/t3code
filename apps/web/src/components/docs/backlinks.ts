@@ -65,26 +65,40 @@ export interface OutlineItem {
   slug: string;
 }
 
+export interface LocatedOutlineItem extends OutlineItem {
+  /** 1-based line within the text passed in. */
+  line: number;
+}
+
 const HEADING = /^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*\r?$/;
 
+/** GitHub-style slug without the duplicate counter. */
+export function slugifyHeading(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+    .replace(/\s+/g, "-");
+}
+
 // GitHub-style slugs; duplicates get `-1`, `-2`, ...
-export function outline(body: string): OutlineItem[] {
+export function outlineWithLines(body: string): LocatedOutlineItem[] {
   const lines = body.split("\n");
   const masked = maskFences(body).split("\n");
   const seen = new Map<string, number>();
-  const out: OutlineItem[] = [];
+  const out: LocatedOutlineItem[] = [];
   lines.forEach((line, i) => {
     const m = HEADING.exec(line);
     if (!m || masked[i] !== line) return;
     const text = m[2] ?? "";
-    const base = text
-      .toLowerCase()
-      .trim()
-      .replace(/[^\p{L}\p{N}\s_-]/gu, "")
-      .replace(/\s+/g, "-");
+    const base = slugifyHeading(text);
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
-    out.push({ level: m[1]?.length ?? 1, text, slug: n ? `${base}-${n}` : base });
+    out.push({ level: m[1]?.length ?? 1, text, slug: n ? `${base}-${n}` : base, line: i + 1 });
   });
   return out;
+}
+
+export function outline(body: string): OutlineItem[] {
+  return outlineWithLines(body).map(({ level, text, slug }) => ({ level, text, slug }));
 }
