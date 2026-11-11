@@ -12,9 +12,14 @@ import type {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import {
+  checkpointFileTotals,
+  type ThreadCheckpointSummary,
+} from "@t3tools/client-runtime/state/thread-checkpoints";
 import { AsyncResult } from "effect/reactivity";
 import { BookOpenIcon } from "lucide-react";
 
+import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 import { toastManager } from "../ui/toast";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
@@ -36,6 +41,39 @@ function isBindablePlan(entry: ProjectEntry): boolean {
 
 function planLabel(planPath: string): string {
   return planPath.slice(planPath.lastIndexOf("/") + 1).replace(/\.md$/, "");
+}
+
+/**
+ * Warn-only nudge for code changed without a bound plan. Any completed turn with changed files
+ * counts as "code was mutated"; the checkpoint summaries are the cheap client-side signal for it.
+ */
+export function noPlanBannerItem(input: {
+  readonly docsProjectId: ProjectId | null | undefined;
+  readonly docsGate: "off" | "warn" | undefined;
+  readonly planPath: string | null | undefined;
+  readonly checkpoints: ReadonlyArray<ThreadCheckpointSummary>;
+  readonly onBind: () => void;
+  readonly onDismiss: () => void;
+}): ComposerBannerStackItem | null {
+  if (!input.docsProjectId || input.docsGate === "off" || input.planPath) return null;
+  // ponytail: "mutated" = any checkpoint with changed files; no per-turn gating or server signal.
+  if (!input.checkpoints.some((checkpoint) => checkpointFileTotals(checkpoint).count > 0)) {
+    return null;
+  }
+  return {
+    id: "no-plan-bound",
+    variant: "info",
+    role: "status",
+    icon: <BookOpenIcon />,
+    title: "No plan bound to this thread. Bind one to keep docs in sync.",
+    actions: (
+      <Button size="xs" variant="ghost" onClick={input.onBind}>
+        Bind plan
+      </Button>
+    ),
+    dismissLabel: "Dismiss plan notice",
+    onDismiss: input.onDismiss,
+  };
 }
 
 export function PlanChecklist({
@@ -163,9 +201,17 @@ function PlanPicker({
   return (
     <div className="flex w-64 flex-col gap-2">
       <h3 className="font-medium text-sm">Bind plan</h3>
-      {AsyncResult.isSuccess(entries) && plans.length === 0 ? (
-        <p className="text-muted-foreground text-xs">No plans in {PLANS_DIRECTORY}.</p>
-      ) : null}
+      {AsyncResult.isFailure(entries) ? (
+        <p role="alert" className="text-xs">
+          Could not list plans in {PLANS_DIRECTORY}.
+        </p>
+      ) : AsyncResult.isSuccess(entries) ? (
+        plans.length === 0 ? (
+          <p className="text-muted-foreground text-xs">No plans in {PLANS_DIRECTORY}.</p>
+        ) : null
+      ) : (
+        <p className="text-muted-foreground text-xs">Loading plans…</p>
+      )}
       <ul className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
         {plans.map((entry) => (
           <li key={entry.path}>
@@ -189,10 +235,14 @@ export function ThreadPlanControl({
   environmentId,
   threadId,
   docsProjectId,
+  open,
+  onOpenChange,
 }: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly docsProjectId: ProjectId | null | undefined;
+  readonly open?: boolean | undefined;
+  readonly onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
   const docsProject = useProject(
     docsProjectId ? scopeProjectRef(environmentId, docsProjectId) : null,
@@ -227,7 +277,7 @@ export function ThreadPlanControl({
   };
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
         className="inline-flex min-w-0 max-w-48 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground text-xs transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         aria-label={planPath ? `Plan: ${planLabel(planPath)}` : "Bind plan"}

@@ -51,6 +51,8 @@ interface ChatHeaderProps {
   activeThreadLinkOrigin?: string | null | undefined;
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
+  planPickerOpen?: boolean;
+  onPlanPickerOpenChange?: (open: boolean) => void;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
@@ -76,6 +78,8 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadLinkOrigin,
   isServerThread,
   activeProject,
+  planPickerOpen,
+  onPlanPickerOpenChange,
   parentThreadLink,
   onOpenThread,
   rightPanelOpen,
@@ -399,6 +403,8 @@ export const ChatHeader = memo(function ChatHeader({
           environmentId={activeThreadEnvironmentId}
           threadId={activeThreadId}
           docsProjectId={activeProject.docsProjectId}
+          open={planPickerOpen}
+          onOpenChange={onPlanPickerOpenChange}
         />
       ) : null}
       {isServerThread ? <GuestShareIndicator threadRef={activeThreadRef} /> : null}

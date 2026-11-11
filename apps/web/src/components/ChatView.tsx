@@ -277,6 +277,7 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { noPlanBannerItem } from "./chat/ThreadPlan";
 import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
@@ -1667,6 +1668,9 @@ export default function ChatView(props: ChatViewProps) {
     resumeCompactionPermanentlyDismissed,
     setResumeCompactionPermanentlyDismissed,
   ]);
+  // In-memory, per thread: the no-plan notice and the bind picker it opens.
+  const [dismissedNoPlanThreadKey, setDismissedNoPlanThreadKey] = useState<string | null>(null);
+  const [planPickerThreadKey, setPlanPickerThreadKey] = useState<string | null>(null);
   const [dismissedFallbackWindow, setDismissedFallbackWindow] = useLocalStorage(
     `t3code:fallback-notice-dismissed:${environmentId}`,
     null,
@@ -2598,6 +2602,18 @@ export default function ChatView(props: ChatViewProps) {
       freshSessionAvailable && freshSessionArmed && activePendingApproval === null
         ? [freshSessionBannerItem(() => disarmFreshSession(routeThreadKey))]
         : [];
+    const noPlanItem =
+      isServerThread && activeThreadShell && dismissedNoPlanThreadKey !== routeThreadKey
+        ? noPlanBannerItem({
+            docsProjectId: activeProject?.docsProjectId,
+            docsGate: activeProject?.docsGate,
+            planPath: activeThreadShell.planPath,
+            checkpoints: turnDiffSummaries,
+            onBind: () => setPlanPickerThreadKey(routeThreadKey),
+            onDismiss: () => setDismissedNoPlanThreadKey(routeThreadKey),
+          })
+        : null;
+    const noPlanItems = noPlanItem === null ? [] : [noPlanItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
         ...feedbackBannerItems,
@@ -2607,6 +2623,7 @@ export default function ChatView(props: ChatViewProps) {
         ...usageLimitsItems,
         ...projectCloneItems,
         ...freshSessionItems,
+        ...noPlanItems,
         ...systemComposerBannerItems,
       ];
     }
@@ -2618,6 +2635,7 @@ export default function ChatView(props: ChatViewProps) {
       ...usageLimitsItems,
       ...projectCloneItems,
       ...freshSessionItems,
+      ...noPlanItems,
       ...systemComposerBannerItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,
@@ -3311,6 +3329,10 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadTitle={activeThread.title}
               activeThreadLinkOrigin={activeThreadShell?.linkOrigin?.label ?? null}
               activeProject={activeProject ?? null}
+              planPickerOpen={planPickerThreadKey === routeThreadKey}
+              onPlanPickerOpenChange={(open) =>
+                setPlanPickerThreadKey(open ? routeThreadKey : null)
+              }
               parentThreadLink={headerParentThreadLink}
               onOpenThread={onOpenRelatedThreadStable}
               rightPanelOpen={inlineRightPanelOwnsTitleBar}
