@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { matchesGlob } from "node:path";
 import type { DriftItem, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
+import { TrimmedNonEmptyString } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,9 +16,9 @@ import * as WorkspaceFileSystem from "../workspace/WorkspaceFileSystem.ts";
 export const DOCS_SYNC_PATH = "docs/docs-sync.json";
 
 const DocsSyncRule = Schema.Struct({
-  id: Schema.String,
+  id: TrimmedNonEmptyString,
   when: Schema.String,
-  expect: Schema.String,
+  expect: TrimmedNonEmptyString,
   message: Schema.String,
 });
 export type DocsSyncRule = typeof DocsSyncRule.Type;

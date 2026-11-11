@@ -22,7 +22,12 @@ const frontmatterValue = (lines: ReadonlyArray<string>, key: string) => {
   if (lines[0] !== "---") return "";
   const end = lines.indexOf("---", 1);
   const line = lines.slice(1, end === -1 ? undefined : end).find((l) => l.startsWith(`${key}:`));
-  return line === undefined ? "" : line.slice(key.length + 1).trim().replace(/^["']|["']$/g, "");
+  return line === undefined
+    ? ""
+    : line
+        .slice(key.length + 1)
+        .trim()
+        .replace(/^["']|["']$/g, "");
 };
 
 const progressSection = (lines: ReadonlyArray<string>) => {
@@ -160,6 +165,10 @@ export const make = Effect.gen(function* () {
       });
     }
     if (next !== text) {
+      // ponytail: compare-before-write narrows the race with agent edits but is not atomic; add a keyed lock if toggles contend.
+      if ((yield* readText(cwd, planPath)) !== text) {
+        return yield* unreadable(`Plan changed while updating: ${planPath}. Retry.`);
+      }
       yield* workspaceFileSystem
         .writeFile({ cwd, relativePath: planPath, contents: next })
         .pipe(Effect.mapError(() => unreadable(`Plan write failed: ${planPath}`)));
