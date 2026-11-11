@@ -463,7 +463,11 @@ function ProjectDetail({
             disabled={!canEditGroup}
           >
             <SelectTrigger size="sm" className="w-full sm:w-64" aria-label="Docs project">
-              <SelectValue />
+              <SelectValue>
+                {docsProjectCandidates.find(
+                  (project) => project.id === representative.docsProjectId,
+                )?.title ?? "None"}
+              </SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
               <SelectItem hideIndicator value="none">
@@ -496,7 +500,7 @@ function ProjectDetail({
               disabled={!canEditGroup}
             >
               <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Docs gate">
-                <SelectValue />
+                <SelectValue>{representative.docsGate === "off" ? "Off" : "Warn"}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="warn">
