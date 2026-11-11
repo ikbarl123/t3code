@@ -19,8 +19,13 @@ import * as Layer from "effect/Layer";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as DocsContextService from "../plan/DocsContextService.ts";
 
-export const layer = Layer.merge(
+export const layer = Layer.mergeAll(
+  Layer.mock(DocsContextService.DocsContextService)({
+    forTurn: () => Effect.succeed(null),
+    commit: () => Effect.void,
+  }),
   Layer.mock(GitWorkflow.GitWorkflowService)({
     pruneWorktrees: () => Effect.void,
     createWorktree: () => Effect.succeed({} as never),
