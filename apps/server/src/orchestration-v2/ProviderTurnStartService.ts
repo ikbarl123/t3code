@@ -1610,8 +1610,8 @@ export const layer: Layer.Layer<
             compact || goalCommand || docsContext === null
               ? null
               : yield* docsContext.forTurn({
-                  // Keyed by native provider thread: a new session has not seen the bundle.
-                  threadId: runningProviderThread.id,
+                  // Keyed by provider thread and session: a recovered session has not seen the bundle.
+                  threadId: `${runningProviderThread.id}:${providerSessionId}`,
                   projectId: projection.thread.projectId,
                   planPath: projection.thread.planPath ?? null,
                 });
@@ -1641,7 +1641,10 @@ export const layer: Layer.Layer<
           );
           // Commit only after acceptance, so a refused prompt re-injects next turn.
           if (docs !== null && docsContext !== null)
-            yield* docsContext.commit(runningProviderThread.id, docs.text);
+            yield* docsContext.commit(
+              `${runningProviderThread.id}:${providerSessionId}`,
+              docs.text,
+            );
           // After provider acceptance, failed delivery bookkeeping must not stop live ingestion.
           const nativeThreadId = runningProviderThread.nativeThreadRef?.nativeId;
           yield* Effect.forEach(

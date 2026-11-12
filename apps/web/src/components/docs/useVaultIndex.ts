@@ -66,7 +66,7 @@ async function loadVault(
     const listing = await readIfCurrent(
       projectEnvironment.listEntries({
         environmentId,
-        input: { cwd, ...(directoryPath !== undefined ? { directoryPath } : {}) },
+        input: { cwd, directoryPath: directoryPath ?? "" },
       }),
     );
     if (listing === null) throw new Error("Could not list the vault.");

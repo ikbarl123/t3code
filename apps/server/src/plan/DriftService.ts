@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics nodeBuiltinImport:off -- node:path matchesGlob has no Effect equivalent
 import { matchesGlob } from "node:path";
 import type { DriftItem, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
 import { TrimmedNonEmptyString } from "@t3tools/contracts";

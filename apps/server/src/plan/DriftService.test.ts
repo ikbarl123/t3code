@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics nodeBuiltinImport:off -- node:fs/path used for temp fixtures
 import { assert, describe, it } from "@effect/vitest";
 import { matchesGlob } from "node:path";
 

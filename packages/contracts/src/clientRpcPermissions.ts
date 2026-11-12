@@ -3,6 +3,8 @@ import { GitPreparePullRequestThreadInput, GitRunStackedActionInput } from "./gi
 import {
   AuthAccessWriteScope,
   AuthEnvironmentMaintainScope,
+  AuthFilesystemReadScope,
+  AuthFilesystemWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
@@ -74,9 +76,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // A guest link hands thread access to someone outside, like a pairing link.
   [WS_METHODS.guestShareCreate]: AuthAccessWriteScope,
   // Toggling writes the plan file in the docs vault.
-  [WS_METHODS.planToggleMilestone]: AuthOrchestrationOperateScope,
-  [WS_METHODS.planRead]: AuthOrchestrationReadScope,
-  [WS_METHODS.planDriftCheck]: AuthOrchestrationReadScope,
+  [WS_METHODS.planToggleMilestone]: AuthFilesystemWriteScope,
+  [WS_METHODS.planRead]: AuthFilesystemReadScope,
+  [WS_METHODS.planDriftCheck]: AuthFilesystemReadScope,
   [WS_METHODS.peerLinksLink]: AuthAccessWriteScope,
   [WS_METHODS.peerLinksUnlink]: AuthAccessWriteScope,
   // A link lets every agent here reach the other environment: Settings' bar.
