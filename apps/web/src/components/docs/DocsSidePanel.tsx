@@ -1,5 +1,3 @@
-import { useMemo } from "react";
-
 import { Badge } from "../ui/badge";
 import { splitFrontmatter, type FrontmatterValue } from "./frontmatter";
 import { outlineWithLines, type Backlink } from "./backlinks";
@@ -34,9 +32,9 @@ type NoteDetailsProps = Pick<ReturnType<typeof useDocsPage>, "vault" | "openNote
 };
 
 function NoteDetails({ path, text, vault, openNote }: NoteDetailsProps) {
-  const { properties, body } = useMemo(() => splitFrontmatter(text), [text]);
-  const tags = useMemo(() => extractTags(body, properties), [body, properties]);
-  const headings = useMemo(() => outlineWithLines(body), [body]);
+  const { properties, body } = splitFrontmatter(text);
+  const tags = extractTags(body, properties);
+  const headings = outlineWithLines(body);
   const backlinks = vault.index?.backlinks.get(path) ?? [];
   const outgoing = vault.index?.outgoing.get(path) ?? [];
   const propertyEntries = Object.entries(properties);
@@ -127,15 +125,13 @@ function BacklinkGroups({
   readonly backlinks: ReadonlyArray<Backlink>;
   readonly openNote: (path: string, target?: { line?: number }) => void;
 }) {
-  const groups = useMemo(() => {
-    const byFrom = new Map<string, Backlink[]>();
-    for (const link of backlinks) {
-      const list = byFrom.get(link.from) ?? [];
-      list.push(link);
-      byFrom.set(link.from, list);
-    }
-    return [...byFrom];
-  }, [backlinks]);
+  const byFrom = new Map<string, Backlink[]>();
+  for (const link of backlinks) {
+    const list = byFrom.get(link.from) ?? [];
+    list.push(link);
+    byFrom.set(link.from, list);
+  }
+  const groups = [...byFrom];
   return (
     <ul className="flex flex-col gap-3">
       {groups.map(([from, links]) => (

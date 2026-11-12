@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 import { CommandDialog, CommandDialogPopup, CommandItem, CommandList } from "../ui/command";
 import { CommandPaletteContent } from "../CommandPaletteContent";
@@ -25,7 +25,7 @@ export function DocsQuickSwitcher(props: DocsQuickSwitcherProps) {
 function QuickSwitcherBody({ paths, onOpenChange, onOpenNote }: DocsQuickSwitcherProps) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const matches = useMemo(() => rankNotePaths(paths, query), [paths, query]);
+  const matches = rankNotePaths(paths, query);
   const selected = matches[Math.min(active, matches.length - 1)];
 
   const choose = (path: string | undefined) => {

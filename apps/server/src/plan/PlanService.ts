@@ -155,6 +155,7 @@ export const make = Effect.gen(function* () {
     const file = yield* workspaceFileSystem
       .readFile({ cwd, relativePath })
       .pipe(Effect.mapError(() => unreadable(`Plan unreadable: ${relativePath}`)));
+    if (!file.exists) return yield* unreadable(`Plan missing: ${relativePath}`);
     if (file.truncated) return yield* unreadable(`Plan too large: ${relativePath}`);
     return file.contents;
   });

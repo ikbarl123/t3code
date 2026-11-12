@@ -149,6 +149,11 @@ export function DocsNote({
           <NoteContext value={{ environmentId, cwd, notePath: path, onOpenNote }}>
             <ScrollToTarget target={target} contentKey={`${path}:${body.length}`}>
               <div className="text-sm leading-relaxed">
+                {result.value.truncated ? (
+                  <p className="mb-3 text-warning-foreground text-xs">
+                    This note is too large; showing the first part only.
+                  </p>
+                ) : null}
                 <ReactMarkdown
                   remarkPlugins={plugins}
                   rehypePlugins={rehypePlugins}
@@ -307,10 +312,8 @@ function NoteLink({
 /** Parses `#wikilink:<encodedPath>[&h=<encodedHeading>]` as written by remarkWikilinks. */
 function parseWikilinkHref(href: string): { readonly path: string; readonly heading?: string } {
   const [encodedPath = "", encodedHeading] = href.slice("#wikilink:".length).split("&h=");
-  const path = decodeURIComponent(encodedPath);
-  return encodedHeading === undefined
-    ? { path }
-    : { path, heading: decodeURIComponent(encodedHeading) };
+  const path = decodeSegment(encodedPath);
+  return encodedHeading === undefined ? { path } : { path, heading: decodeSegment(encodedHeading) };
 }
 
 function NoteBlockquote({
@@ -341,7 +344,7 @@ function NoteImage({
 }: ComponentPropsWithoutRef<"img"> & ExtraProps) {
   const note = use(NoteContext);
   if (src?.startsWith("#embed:")) {
-    const path = decodeURIComponent(src.slice("#embed:".length));
+    const path = decodeSegment(src.slice("#embed:".length));
     if (dataAttr(props, "data-unresolved") === "true" || note === null) {
       return <EmbedChip name={alt ?? path} unresolved />;
     }
