@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Semaphore from "effect/Semaphore";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -163,10 +164,21 @@ export const make = Effect.gen(function* () {
     return parsePlan(yield* readText(cwd, planPath));
   });
 
+  // Serializes toggles in this process; agent edits are still guarded by compare-before-write below.
+  const writeLock = yield* Semaphore.make(1);
+
   const toggleMilestone: PlanService["Service"]["toggleMilestone"] = Effect.fn(
     "PlanService.toggleMilestone",
   )(function* (input) {
     const { cwd, planPath } = yield* resolvePlan(input.threadId);
+    return yield* writeLock.withPermits(1)(update(cwd, planPath, input));
+  });
+
+  const update = Effect.fn("PlanService.update")(function* (
+    cwd: string,
+    planPath: string,
+    input: PlanToggleMilestoneInput,
+  ) {
     const text = yield* readText(cwd, planPath);
     const date = DateTime.formatIsoDateUtc(yield* DateTime.now);
     const next = setMilestone(text, input.id, input.done, date);

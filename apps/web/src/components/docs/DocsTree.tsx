@@ -39,7 +39,7 @@ function visibleChildren(entries: ReadonlyArray<ProjectEntry>, directoryPath: st
 function listEntriesAtom(environmentId: EnvironmentId, cwd: string, directoryPath?: string) {
   return projectEnvironment.listEntries({
     environmentId,
-    input: { cwd, ...(directoryPath !== undefined ? { directoryPath } : {}) },
+    input: { cwd, directoryPath: directoryPath ?? "" },
   });
 }
 
