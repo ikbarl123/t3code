@@ -1,6 +1,6 @@
 import type { EnvironmentId, ProjectContentMatch } from "@t3tools/contracts";
 import { ChevronRightIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { useEnvironmentQuery } from "~/state/query";
 import { projectContentSearch } from "~/state/projects";
@@ -150,10 +150,7 @@ export function DocsSearchPanel({
   );
 
   const rawMatches = result.data?.matches ?? NO_MATCHES;
-  const { groups, rows } = useMemo(
-    () => groupVisibleMatches(rawMatches, collapsed),
-    [rawMatches, collapsed],
-  );
+  const { groups, rows } = groupVisibleMatches(rawMatches, collapsed);
   const fileCount = groups.length;
   const visibleCount = groups.reduce((total, group) => total + group.matches.length, 0);
   const isStale = query !== debouncedQuery || result.isPending;

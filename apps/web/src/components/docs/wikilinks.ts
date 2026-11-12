@@ -72,10 +72,22 @@ export function resolveWikilink(
   fromPath: string,
   allPaths: string[],
 ): string | null {
+  // A dotted note name ("v1.2") is a note first; fall back to a file link.
+  return (
+    resolveAs(target, fromPath, allPaths, true) ?? resolveAs(target, fromPath, allPaths, false)
+  );
+}
+
+function resolveAs(
+  target: string,
+  fromPath: string,
+  allPaths: string[],
+  noteFirst: boolean,
+): string | null {
   const clean = target.trim().replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
   if (!clean) return fromPath;
   const ext = /\.([a-z0-9]{1,5})$/.exec(clean)?.[1];
-  const isNote = !ext || ext === "md";
+  const isNote = !ext || ext === "md" || noteFirst;
   const key = isNote ? clean.replace(NOTE_EXT, "") : clean;
   const keyName = key.split("/").pop() ?? key;
   const pathKey = (p: string) => (isNote ? p.toLowerCase().replace(NOTE_EXT, "") : p.toLowerCase());
