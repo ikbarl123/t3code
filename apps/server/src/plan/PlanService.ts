@@ -177,7 +177,7 @@ export const make = Effect.gen(function* () {
   const update = Effect.fn("PlanService.update")(function* (
     cwd: string,
     planPath: string,
-    input: PlanToggleMilestoneInput,
+    input: typeof PlanToggleMilestoneInput.Type,
   ) {
     const text = yield* readText(cwd, planPath);
     const date = DateTime.formatIsoDateUtc(yield* DateTime.now);
