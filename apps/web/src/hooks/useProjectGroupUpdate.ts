@@ -1,4 +1,8 @@
-import { AuthOrchestrationOperateScope, type ProjectIconOverride } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type ProjectIconOverride,
+  type ProjectLinkedWorkspace,
+} from "@t3tools/contracts";
 import {
   AuthOrchestrationOperateScope,
   type ProjectId,
@@ -27,6 +31,7 @@ export type ProjectGroupUpdate = Partial<{
   projectIcon: ProjectIconOverride | null;
   docsProjectId: ProjectId | null;
   docsGate: "off" | "warn";
+  linkedWorkspaces: ReadonlyArray<ProjectLinkedWorkspace>;
   pinned: boolean;
   archived: boolean;
 }>;

@@ -49,6 +49,108 @@ function batchFilePaths(files: ReadonlyArray<TurnDiffFileSummary>) {
   return batches;
 }
 
+function parseGitDiffLine(rest: string): { from: string; to: string; quoted: boolean } | null {
+  if (rest.startsWith('"a/')) {
+    let sepIndex = -1;
+    for (let i = 1; i < rest.length - 5; i++) {
+      if (rest[i] === '"' && rest[i - 1] !== "\\" && rest.slice(i, i + 5) === '" "b/') {
+        sepIndex = i;
+        break;
+      }
+    }
+    if (sepIndex !== -1 && rest.endsWith('"')) {
+      const from = rest.slice(3, sepIndex);
+      const to = rest.slice(sepIndex + 5, -1);
+      return { from, to, quoted: true };
+    }
+  }
+
+  if (rest.startsWith("a/")) {
+    const sepIndex = rest.indexOf(" b/");
+    if (sepIndex !== -1) {
+      const from = rest.slice(2, sepIndex);
+      const to = rest.slice(sepIndex + 3);
+      return { from, to, quoted: false };
+    }
+  }
+
+  return null;
+}
+
+export function prefixDiffHeaderPaths(patch: string, label: string): string {
+  if (!patch) return "";
+  const lines = patch.split("\n");
+  const result: string[] = [];
+  let inHeader = false;
+
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      inHeader = true;
+      const parsed = parseGitDiffLine(line.slice("diff --git ".length));
+      if (parsed) {
+        if (parsed.quoted) {
+          result.push(`diff --git "a/[${label}]/${parsed.from}" "b/[${label}]/${parsed.to}"`);
+        } else {
+          result.push(`diff --git a/[${label}]/${parsed.from} b/[${label}]/${parsed.to}`);
+        }
+      } else {
+        result.push(line);
+      }
+      continue;
+    }
+
+    if (line.startsWith("@@ ") && inHeader) {
+      inHeader = false;
+    }
+
+    if (inHeader) {
+      if (line.startsWith("--- a/")) {
+        result.push(`--- a/[${label}]/${line.slice(6)}`);
+      } else if (line.startsWith('--- "a/')) {
+        result.push(`--- "a/[${label}]/${line.slice(7)}`);
+      } else if (line.startsWith("+++ b/")) {
+        result.push(`+++ b/[${label}]/${line.slice(6)}`);
+      } else if (line.startsWith('+++ "b/')) {
+        result.push(`+++ "b/[${label}]/${line.slice(7)}`);
+      } else if (line.startsWith("rename from ")) {
+        const path = line.slice("rename from ".length);
+        result.push(
+          path.startsWith('"')
+            ? `rename from "[${label}]/${path.slice(1)}`
+            : `rename from [${label}]/${path}`,
+        );
+      } else if (line.startsWith("rename to ")) {
+        const path = line.slice("rename to ".length);
+        result.push(
+          path.startsWith('"')
+            ? `rename to "[${label}]/${path.slice(1)}`
+            : `rename to [${label}]/${path}`,
+        );
+      } else if (line.startsWith("copy from ")) {
+        const path = line.slice("copy from ".length);
+        result.push(
+          path.startsWith('"')
+            ? `copy from "[${label}]/${path.slice(1)}`
+            : `copy from [${label}]/${path}`,
+        );
+      } else if (line.startsWith("copy to ")) {
+        const path = line.slice("copy to ".length);
+        result.push(
+          path.startsWith('"')
+            ? `copy to "[${label}]/${path.slice(1)}`
+            : `copy to [${label}]/${path}`,
+        );
+      } else {
+        result.push(line);
+      }
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join("\n");
+}
+
 export class CheckpointDiffQuery extends Context.Service<
   CheckpointDiffQuery,
   {
@@ -202,43 +304,107 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const comparison = {
-        cwd: toScope.cwd,
-        fromCheckpointRef,
-        toCheckpointRef: toCheckpoint.ref,
-        fallbackFromToHead: false,
-        ignoreWhitespace,
-      };
-      const authoredPaths = yield* checkpointStore
-        .listAuthoredPaths(comparison)
-        .pipe(Effect.orElseSucceed(() => null));
-      const files =
-        authoredPaths === null
-          ? []
-          : yield* checkpointStore.diffCheckpoints({ ...comparison, format: "numstat" }).pipe(
-              Effect.map(parseTurnDiffFilesFromNumstat),
-              Effect.orElseSucceed(() => []),
-            );
-      const retainedFiles = files.filter((file) => !isGitImport(file, authoredPaths));
-      // Select retained paths before generating a patch, so imported bulk cannot exhaust its output limit.
-      const pathBatches =
-        retainedFiles.length === files.length ? [undefined] : batchFilePaths(retainedFiles);
+      const computeCwdDiff = Effect.fn("CheckpointDiffQuery.computeCwdDiff")(
+        function* (cwd: string, maxBytes: number) {
+          const comparison = {
+            cwd,
+            fromCheckpointRef,
+            toCheckpointRef: toCheckpoint.ref,
+            fallbackFromToHead: false,
+            ignoreWhitespace,
+          };
+          const authoredPaths = yield* checkpointStore
+            .listAuthoredPaths(comparison)
+            .pipe(Effect.orElseSucceed(() => null));
+          const files =
+            authoredPaths === null
+              ? []
+              : yield* checkpointStore.diffCheckpoints({ ...comparison, format: "numstat" }).pipe(
+                  Effect.map(parseTurnDiffFilesFromNumstat),
+                  Effect.orElseSucceed(() => []),
+                );
+          const retainedFiles = files.filter((file) => !isGitImport(file, authoredPaths));
+          const pathBatches =
+            retainedFiles.length === files.length ? [undefined] : batchFilePaths(retainedFiles);
+          let repoDiff = "";
+          let remaining = maxBytes;
+          let truncated = false;
+          for (const filePaths of pathBatches) {
+            const patch = yield* checkpointStore
+              .diffCheckpoints({
+                ...comparison,
+                ...(filePaths === undefined ? {} : { filePaths }),
+                maxOutputBytes: remaining + 1,
+              })
+              .pipe(Effect.withSpan("checkpoint.turnDiff.diffCheckpoints"));
+            const patchBytes = Buffer.byteLength(patch);
+            repoDiff += patch;
+            if (patchBytes > remaining) {
+              truncated = true;
+              break;
+            }
+            remaining -= patchBytes;
+          }
+          return { repoDiff, truncated };
+        });
+
+      const requestedWorkspaceRoot = input.workspaceRoot;
       let diff = "";
-      let remainingBytes = CHECKPOINT_DIFF_MAX_OUTPUT_BYTES;
-      for (const filePaths of pathBatches) {
-        const patch = yield* checkpointStore
-          .diffCheckpoints({
-            ...comparison,
-            ...(filePaths === undefined ? {} : { filePaths }),
-            // One extra byte distinguishes an exact fit from a truncated patch.
-            maxOutputBytes: remainingBytes + 1,
-          })
-          .pipe(Effect.withSpan("checkpoint.turnDiff.diffCheckpoints"));
-        const patchBytes = Buffer.byteLength(patch);
-        diff += patch;
-        if (patchBytes > remainingBytes) {
-          // Reserve marker space only on overflow, which may trim an earlier batch.
-          // Streaming decode drops an incomplete final UTF-8 character at the byte boundary.
+      if (requestedWorkspaceRoot !== undefined && requestedWorkspaceRoot !== toScope.cwd) {
+        const snapshot = (toCheckpoint.repoSnapshots ?? []).find(
+          (candidate) => candidate.workspaceRoot === requestedWorkspaceRoot,
+        );
+        if (snapshot === undefined || snapshot.status !== "ready") {
+          return yield* new CheckpointRefUnavailableError({
+            operation,
+            threadId: input.threadId,
+            turnCount: input.toTurnCount,
+            checkpoint: "to",
+          });
+        }
+        const { repoDiff, truncated } = yield* computeCwdDiff(
+          snapshot.workspaceRoot,
+          CHECKPOINT_DIFF_MAX_OUTPUT_BYTES,
+        );
+        diff = truncated
+          ? new TextDecoder().decode(
+              Buffer.from(repoDiff).subarray(
+                0,
+                CHECKPOINT_DIFF_MAX_OUTPUT_BYTES - Buffer.byteLength(DIFF_TRUNCATED_MARKER),
+              ),
+              { stream: true },
+            ) + DIFF_TRUNCATED_MARKER
+          : repoDiff;
+      } else {
+        const primary = yield* computeCwdDiff(toScope.cwd, CHECKPOINT_DIFF_MAX_OUTPUT_BYTES);
+        diff = primary.repoDiff;
+        let wasTruncated = primary.truncated;
+        let remainingBytes = Math.max(
+          0,
+          CHECKPOINT_DIFF_MAX_OUTPUT_BYTES - Buffer.byteLength(diff),
+        );
+        if (requestedWorkspaceRoot === undefined && !wasTruncated) {
+          for (const snapshot of toCheckpoint.repoSnapshots ?? []) {
+            if (snapshot.status !== "ready" || remainingBytes <= 0) continue;
+            const linked = yield* computeCwdDiff(snapshot.workspaceRoot, remainingBytes).pipe(
+              Effect.orElseSucceed(() => ({ repoDiff: "", truncated: false })),
+            );
+            if (linked.repoDiff.length > 0) {
+              const prefixed = prefixDiffHeaderPaths(linked.repoDiff, snapshot.label);
+              if (diff.length > 0 && !diff.endsWith("\n")) diff += "\n";
+              diff += prefixed;
+              remainingBytes = Math.max(
+                0,
+                CHECKPOINT_DIFF_MAX_OUTPUT_BYTES - Buffer.byteLength(diff),
+              );
+            }
+            if (linked.truncated || Buffer.byteLength(diff) > CHECKPOINT_DIFF_MAX_OUTPUT_BYTES) {
+              wasTruncated = true;
+              break;
+            }
+          }
+        }
+        if (wasTruncated) {
           diff =
             new TextDecoder().decode(
               Buffer.from(diff).subarray(
@@ -247,9 +413,7 @@ export const make = Effect.gen(function* () {
               ),
               { stream: true },
             ) + DIFF_TRUNCATED_MARKER;
-          break;
         }
-        remainingBytes -= patchBytes;
       }
 
       const turnDiff = buildTurnDiffResult(input, diff);
@@ -300,6 +464,7 @@ export const make = Effect.gen(function* () {
       fromTurnCount: 0,
       toTurnCount: input.toTurnCount,
       ignoreWhitespace,
+      ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
     });
     if (!isTurnDiffResult(turnDiff)) {
       return yield* new CheckpointDiffResultInvalidError({

@@ -24,6 +24,9 @@ export const projectMutationOperation = Effect.fn("projectMutationOperation")(fu
           ? {}
           : { defaultModelSelection: mutation.defaultModelSelection }),
         ...(mutation.scripts === undefined ? {} : { scripts: mutation.scripts }),
+        ...(mutation.linkedWorkspaces === undefined
+          ? {}
+          : { linkedWorkspaces: mutation.linkedWorkspaces }),
       });
 
     case "project.update":
@@ -44,6 +47,9 @@ export const projectMutationOperation = Effect.fn("projectMutationOperation")(fu
         ...(mutation.scripts === undefined ? {} : { scripts: mutation.scripts }),
         ...(mutation.docsProjectId === undefined ? {} : { docsProjectId: mutation.docsProjectId }),
         ...(mutation.docsGate === undefined ? {} : { docsGate: mutation.docsGate }),
+        ...(mutation.linkedWorkspaces === undefined
+          ? {}
+          : { linkedWorkspaces: mutation.linkedWorkspaces }),
         ...(mutation.pinned === undefined ? {} : { pinned: mutation.pinned }),
         ...(mutation.archived === undefined ? {} : { archived: mutation.archived }),
       });

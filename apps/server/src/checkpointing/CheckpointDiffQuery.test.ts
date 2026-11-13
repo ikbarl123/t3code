@@ -343,3 +343,36 @@ it.effect("preserves an exact-fit filtered patch across batches without a marker
     assert.strictEqual(patchReads, 2);
   }).pipe(Effect.provide(layer));
 });
+
+it("prefixes diff header paths accurately without mutating body lines or mangling paths containing b/", () => {
+  const patch = [
+    "diff --git a/file.ts b/file.ts",
+    "index 1111..2222 100644",
+    "--- a/file.ts",
+    "+++ b/file.ts",
+    "@@ -1,3 +1,3 @@",
+    "-deleted -- a/not-a-header",
+    "+added ++ b/not-a-header",
+    " unchanged",
+    "diff --git \"a/path with b/ space.ts\" \"b/path with b/ space.ts\"",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ \"b/path with b/ space.ts\"",
+    "@@ -0,0 +1 @@",
+    "+content",
+  ].join("\n");
+
+  const prefixed = CheckpointDiffQuery.prefixDiffHeaderPaths(patch, "linked-repo");
+
+  assert.include(prefixed, "diff --git a/[linked-repo]/file.ts b/[linked-repo]/file.ts");
+  assert.include(prefixed, "--- a/[linked-repo]/file.ts");
+  assert.include(prefixed, "+++ b/[linked-repo]/file.ts");
+  assert.include(prefixed, "-deleted -- a/not-a-header");
+  assert.include(prefixed, "+added ++ b/not-a-header");
+  assert.include(
+    prefixed,
+    "diff --git \"a/[linked-repo]/path with b/ space.ts\" \"b/[linked-repo]/path with b/ space.ts\"",
+  );
+  assert.include(prefixed, "--- /dev/null");
+  assert.include(prefixed, "+++ \"b/[linked-repo]/path with b/ space.ts\"");
+});

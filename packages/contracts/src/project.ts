@@ -46,6 +46,14 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+export const ProjectLinkedWorkspace = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  workspaceRoot: TrimmedNonEmptyString,
+  repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
+});
+export type ProjectLinkedWorkspace = typeof ProjectLinkedWorkspace.Type;
+
 export const ProjectIconColor = Schema.Literals([
   "gray",
   "red",
@@ -168,6 +176,7 @@ export const Project = Schema.Struct({
   /** Absent on older projects; read as "warn". */
   docsGate: Schema.optional(Schema.Literals(["off", "warn"])),
 
+  linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   createdAt: IsoDateTime,
@@ -188,6 +197,7 @@ export const ProjectCreatePayload = Schema.Struct({
   createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
 });
 export type ProjectCreatePayload = typeof ProjectCreatePayload.Type;
 
@@ -203,6 +213,7 @@ export const ProjectUpdatePayload = Schema.Struct({
   docsProjectId: Schema.optional(Schema.NullOr(ProjectId)),
   docsGate: Schema.optional(Schema.Literals(["off", "warn"])),
 
+  linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
   pinned: Schema.optional(Schema.Boolean),
   archived: Schema.optional(
     Schema.Boolean.annotate({

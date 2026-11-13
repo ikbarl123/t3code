@@ -75,4 +75,44 @@ describe("mutateProjectWithClone", () => {
       expect(discarded).toEqual([projectId]);
     }),
   );
+
+  it.effect("forwards linkedWorkspaces on create and update, allowing persistence and clearing", () =>
+    Effect.gen(function* () {
+      let createdInput: unknown = null;
+      let updatedInput: unknown = null;
+      const projects = {
+        create: (input: unknown) => {
+          createdInput = input;
+          return Effect.succeed(deletedProject);
+        },
+        update: (input: unknown) => {
+          updatedInput = input;
+          return Effect.succeed(deletedProject);
+        },
+        delete: () => Effect.die("unused"),
+      };
+
+      const linked = [
+        { id: "svc-1", label: "Service 1", workspaceRoot: "/workspace/svc-1" },
+      ];
+
+      yield* mutateProjectWithClone(projects, { discard: () => Effect.void }, {
+        type: "project.create",
+        commandId: CommandId.make("cmd-create"),
+        projectId,
+        title: "Test",
+        workspaceRoot: "/workspace/test",
+        linkedWorkspaces: linked,
+      });
+      expect(createdInput).toMatchObject({ linkedWorkspaces: linked });
+
+      yield* mutateProjectWithClone(projects, { discard: () => Effect.void }, {
+        type: "project.update",
+        commandId: CommandId.make("cmd-update-clear"),
+        projectId,
+        linkedWorkspaces: [],
+      });
+      expect(updatedInput).toMatchObject({ linkedWorkspaces: [] });
+    }),
+  );
 });

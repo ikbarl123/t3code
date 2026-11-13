@@ -127,7 +127,7 @@ import { sourceControlClients } from "@t3tools/client-runtime/source-control-cli
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { useOpenLink } from "~/browser/useOpenLink";
 
-interface GitActionsControlProps {
+export interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
@@ -136,6 +136,12 @@ interface GitActionsControlProps {
   showChanges?: boolean;
   onOpenChanges?: () => void;
   workspaceMutationId?: string | null;
+  syncThreadBranch?: boolean;
+  inlineSuccess?: InlineGitActionSuccess | null;
+  onInlineSuccessChange?: (
+    success: InlineGitActionSuccess | null,
+    targetCwd?: string | null,
+  ) => void;
 }
 
 interface PendingDefaultBranchAction {
@@ -157,7 +163,7 @@ interface RunGitActionWithToastInput {
   filePaths?: string[];
 }
 
-interface InlineGitActionSuccess {
+export interface InlineGitActionSuccess {
   readonly title: string;
   readonly description: string | null;
   readonly scopeKey: string;
@@ -957,6 +963,9 @@ export default function GitActionsControl({
   showChanges = true,
   onOpenChanges,
   workspaceMutationId = null,
+  syncThreadBranch = true,
+  inlineSuccess: controlledInlineSuccess,
+  onInlineSuccessChange,
 }: GitActionsControlProps) {
   const panelAnchorRef = useRef<HTMLDivElement | null>(null);
   const updateThreadMetadata = useAtomCommand(
@@ -997,7 +1006,16 @@ export default function GitActionsControl({
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
   const [isEditingFiles, setIsEditingFiles] = useState(false);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
-  const [inlineSuccess, setInlineSuccess] = useState<InlineGitActionSuccess | null>(null);
+  const [localInlineSuccess, setLocalInlineSuccess] = useState<InlineGitActionSuccess | null>(null);
+  const inlineSuccess =
+    controlledInlineSuccess !== undefined ? controlledInlineSuccess : localInlineSuccess;
+  const setInlineSuccess = (value: InlineGitActionSuccess | null) => {
+    if (onInlineSuccessChange) {
+      onInlineSuccessChange(value, gitCwd);
+    } else {
+      setLocalInlineSuccess(value);
+    }
+  };
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
   const sourceControlScope = { environmentId: activeEnvironmentId, cwd: gitCwd };
@@ -1007,7 +1025,7 @@ export default function GitActionsControl({
     inlineSuccess?.scopeKey === successScopeKey && !inlineSuccessExpired ? inlineSuccess : null;
 
   const persistThreadBranchSync = (branch: string | null, manualSelection = false) => {
-    if (!activeThreadRef) {
+    if (!syncThreadBranch || !activeThreadRef) {
       return;
     }
 
@@ -1150,7 +1168,7 @@ export default function GitActionsControl({
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- persists the draft thread branch when the live git status subscription reports a different branch
   useEffect(() => {
-    if (isGitActionRunning || isSelectingWorktreeBase || activeServerThread) {
+    if (!syncThreadBranch || isGitActionRunning || isSelectingWorktreeBase || activeServerThread) {
       return;
     }
 
@@ -1169,6 +1187,7 @@ export default function GitActionsControl({
     gitStatusForActions,
     isGitActionRunning,
     isSelectingWorktreeBase,
+    syncThreadBranch,
   ]);
 
   const isDefaultRef = gitStatusForActions?.isDefaultRef ?? false;

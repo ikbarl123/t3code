@@ -5,6 +5,7 @@ import {
   type ModelSelection,
   type ProjectIconOverride,
   ProjectId,
+  type ProjectLinkedWorkspace,
   type ProjectScript,
   SCRIPT_RUN_COMMAND_PATTERN,
   type ThreadEnvMode,
@@ -23,6 +24,7 @@ export interface ProjectCreateCommand {
   readonly title: string;
   readonly workspaceRoot: string;
   readonly scripts?: ReadonlyArray<ProjectScript>;
+  readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
 }
 
 export interface ProjectMetaUpdateCommand {
@@ -39,6 +41,7 @@ export interface ProjectMetaUpdateCommand {
   readonly scripts?: ReadonlyArray<ProjectScript>;
   readonly docsProjectId?: ProjectId | null;
   readonly docsGate?: "off" | "warn";
+  readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
   readonly pinned?: boolean;
   readonly archived?: boolean;
 }
@@ -165,6 +168,9 @@ export function planProjectCommand(input: {
           faviconPath: null,
           projectIcon: null,
           scripts: command.scripts ?? [],
+          ...(command.linkedWorkspaces === undefined
+            ? {}
+            : { linkedWorkspaces: command.linkedWorkspaces }),
           createdAt: occurredAt,
           updatedAt: occurredAt,
         },
@@ -214,6 +220,9 @@ export function planProjectCommand(input: {
           ...(command.scripts === undefined ? {} : { scripts: command.scripts }),
           ...(command.docsProjectId === undefined ? {} : { docsProjectId: command.docsProjectId }),
           ...(command.docsGate === undefined ? {} : { docsGate: command.docsGate }),
+          ...(command.linkedWorkspaces === undefined
+            ? {}
+            : { linkedWorkspaces: command.linkedWorkspaces }),
           // Repeating a pin or archive keeps the original time.
           ...(command.pinned === undefined
             ? {}
