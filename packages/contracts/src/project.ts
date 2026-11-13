@@ -171,6 +171,10 @@ export const Project = Schema.Struct({
   autoPull: Schema.optional(Schema.Boolean),
   scripts: Schema.Array(ProjectScript),
   linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
+  /** Linked docs vault project. Absent means none. */
+  docsProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  /** Absent on older projects; read as "warn". */
+  docsGate: Schema.optional(Schema.Literals(["off", "warn"])),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   createdAt: IsoDateTime,
@@ -205,6 +209,8 @@ export const ProjectUpdatePayload = Schema.Struct({
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
+  docsProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  docsGate: Schema.optional(Schema.Literals(["off", "warn"])),
   pinned: Schema.optional(Schema.Boolean),
   archived: Schema.optional(
     Schema.Boolean.annotate({

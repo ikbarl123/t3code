@@ -7,6 +7,7 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 import {
   type EnvironmentId,
+  type ProjectId,
   type ProjectLinkedWorkspace,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
@@ -475,9 +476,7 @@ function ProjectDetail({
       return false;
     }
     const inferredLabel =
-      desiredLabel?.trim() ||
-      trimmedPath.split(/[\\/]/).filter(Boolean).pop() ||
-      "repo";
+      desiredLabel?.trim() || trimmedPath.split(/[\\/]/).filter(Boolean).pop() || "repo";
     const id = `${inferredLabel.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}-${Date.now().toString(36)}`;
     const newEntry: ProjectLinkedWorkspace = {
       id,
@@ -547,10 +546,93 @@ function ProjectDetail({
     setIsSavingLinkedRepos(false);
   };
 
+  const docsProjectCandidates = allProjects.filter(
+    (p) =>
+      p.environmentId === representative.environmentId &&
+      p.id !== representative.id &&
+      !p.isScratch,
+  );
+  const docsMembers = group.memberProjects.filter(
+    (member) => member.environmentId === representative.environmentId,
+  );
+  const docsVaultSection = (
+    <SettingsSection id="project-docs-vault" title="Docs vault">
+      <SettingsRow
+        title="Docs project"
+        description="Another project in this environment that holds this project's docs."
+        control={
+          <Select
+            value={representative.docsProjectId ?? "none"}
+            onValueChange={(value) =>
+              void updateProjectGroup(
+                docsMembers,
+                { docsProjectId: value === "none" ? null : (value as ProjectId) },
+                "Failed to update docs project",
+              )
+            }
+            disabled={!canEditGroup}
+          >
+            <SelectTrigger size="sm" className="w-full sm:w-64" aria-label="Docs project">
+              <SelectValue>
+                {docsProjectCandidates.find(
+                  (project) => project.id === representative.docsProjectId,
+                )?.title ?? "None"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="none">
+                None
+              </SelectItem>
+              {docsProjectCandidates.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.title}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        }
+      />
+      {representative.docsProjectId ? (
+        <SettingsRow
+          title="Docs gate"
+          description="Whether a plan change that skips docs shows a warning."
+          control={
+            <Select
+              value={representative.docsGate ?? "warn"}
+              onValueChange={(value) => {
+                if (value !== "warn" && value !== "off") return;
+                void updateProjectGroup(
+                  docsMembers,
+                  { docsGate: value },
+                  "Failed to update docs gate",
+                );
+              }}
+              disabled={!canEditGroup}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Docs gate">
+                <SelectValue>{representative.docsGate === "off" ? "Off" : "Warn"}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="warn">
+                  Warn
+                </SelectItem>
+                <SelectItem hideIndicator value="off">
+                  Off
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+      ) : null}
+    </SettingsSection>
+  );
+
   const linkedRepositoriesSection = (
     <SettingsSection id="project-linked-repositories" title="Linked Repositories">
       <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
-        Attach additional Git repositories (for example microservices when this project is a centralized docs vault) so turn checkpoints, rollbacks, diffs, and commit history track every repository together.
+        Attach additional Git repositories (for example microservices when this project is a
+        centralized docs vault) so turn checkpoints, rollbacks, diffs, and commit history track
+        every repository together.
       </p>
       {currentLinkedWorkspaces.map((repo) => (
         <SettingsRow
@@ -582,7 +664,11 @@ function ProjectDetail({
                 onValueChange={(val) => setSelectedProjectRootToImport(val ?? "")}
                 disabled={!canEditGroup || isSavingLinkedRepos}
               >
-                <SelectTrigger size="sm" className="w-full sm:w-64" aria-label="Select existing project to link">
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-64"
+                  aria-label="Select existing project to link"
+                >
                   <SelectValue placeholder="Choose a project..." />
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -881,6 +967,7 @@ function ProjectDetail({
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
         {linkedRepositoriesSection}
+        {docsVaultSection}
         {checkoutChoices}
         <SettingsSection title="Danger">
           <SettingsRow

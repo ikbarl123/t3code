@@ -215,6 +215,8 @@ import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import { refreshPushedPullRequests } from "./git/refreshPushedPullRequests.ts";
 import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
+import * as DriftService from "./plan/DriftService.ts";
+import * as PlanService from "./plan/PlanService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
@@ -1519,6 +1521,8 @@ export const layerWsRpc = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const plans = yield* PlanService.PlanService;
+      const drift = yield* DriftService.DriftService;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
@@ -3219,6 +3223,9 @@ export const layerWsRpc = (
         [WS_METHODS.reviewGetBranchCommits]: (input) => review.getBranchCommits(input),
         [WS_METHODS.reviewGetDiffPreview]: (input) => review.getDiffPreview(input),
         [WS_METHODS.reviewGetDiffFileContents]: (input) => review.getDiffFileContents(input),
+        [WS_METHODS.planRead]: (input) => plans.read(input),
+        [WS_METHODS.planToggleMilestone]: (input) => plans.toggleMilestone(input),
+        [WS_METHODS.planDriftCheck]: (input) => drift.check(input),
         [WS_METHODS.terminalOpen]: (input) => terminalManager.open(input),
         [WS_METHODS.terminalAttach]: (input, metadata) =>
           terminalManager.attachOutputStream(input, terminalViewerId(metadata)),

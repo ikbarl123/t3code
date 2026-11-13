@@ -1677,6 +1677,72 @@ it.effect("SQL projection keeps background thread updates out of updatedAt", () 
   backgroundThreadUpdatesKeepTimestamp.pipe(Effect.provide(layerTest)),
 );
 
+// Old streams carry no plan events; a thread written before planPath must project unbound.
+// Bind/unbind are read-state-neutral: they never move updatedAt.
+const planBindingRoundTrips = Effect.gen(function* () {
+  const store = yield* ProjectionStore.ProjectionStoreV2;
+  const createdAt = DateTime.makeUnsafe("2026-11-11T09:00:00.000Z");
+  const threadId = ThreadId.make("thread:plan-binding");
+  const thread = {
+    createdBy: "user" as const,
+    creationSource: "web" as const,
+    id: threadId,
+    projectId: ProjectId.make("project:plan-binding"),
+    title: "Plan binding",
+    providerInstanceId,
+    modelSelection,
+    runtimeMode: "full-access" as const,
+    interactionMode: "default" as const,
+    branch: null,
+    worktreePath: null,
+    activeProviderThreadId: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+    forkedFrom: null,
+    createdAt,
+    updatedAt: createdAt,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    lastVisitedAt: null,
+    deletedAt: null,
+  };
+  yield* store.apply({
+    id: EventId.make("event:plan-binding:created"),
+    type: "thread.created",
+    threadId,
+    occurredAt: createdAt,
+    payload: thread,
+  });
+  assert.isUndefined((yield* store.getThread(threadId)).planPath);
+
+  const bound = { ...thread, planPath: "docs/plans/2026-11-11-x.md" };
+  yield* store.apply({
+    id: EventId.make("event:plan-binding:bound"),
+    type: "thread.plan-bound",
+    threadId,
+    occurredAt: DateTime.add(createdAt, { minutes: 5 }),
+    payload: bound,
+  });
+  const afterBind = yield* store.getThread(threadId);
+  assert.equal(afterBind.planPath, "docs/plans/2026-11-11-x.md");
+  assert.deepEqual(afterBind.updatedAt, createdAt);
+
+  yield* store.apply({
+    id: EventId.make("event:plan-binding:unbound"),
+    type: "thread.plan-unbound",
+    threadId,
+    occurredAt: DateTime.add(createdAt, { minutes: 10 }),
+    payload: { ...bound, planPath: null },
+  });
+  const afterUnbind = yield* store.getThread(threadId);
+  assert.equal(afterUnbind.planPath, null);
+  assert.deepEqual(afterUnbind.updatedAt, createdAt);
+});
+
+it.effect("SQL projection round-trips plan binding and projects pre-plan threads unbound", () =>
+  planBindingRoundTrips.pipe(Effect.provide(layerTest)),
+);
+
 const runlessNativeSubagentNeedsRecovery = Effect.gen(function* () {
   const store = yield* ProjectionStore.ProjectionStoreV2;
   const threadId = yield* addRolledBackRecoveryCandidate("runless-native-recovery");

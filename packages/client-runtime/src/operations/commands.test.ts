@@ -41,6 +41,7 @@ import {
   revertThreadCheckpoint,
   resumeThreadQueue,
   startThreadTurn,
+  updateProject,
 } from "./commands.ts";
 
 const layerTestRandom = Layer.succeed(
@@ -149,6 +150,30 @@ describe("V2 environment commands", () => {
       expect(commands).toEqual([
         { type: "queued-run.start", commandId: "send-selected", threadId, runId: "selected" },
         { type: "queue.resume", commandId: "resume-queue", threadId },
+      ]);
+    }).pipe(Effect.provide(layerTestRandom)),
+  );
+
+  it.effect("sends docs vault settings with project updates", () =>
+    Effect.gen(function* () {
+      const projects: ProjectMutation[] = [];
+      const supervisor = yield* makeSupervisor({ commands: [], projects });
+
+      yield* updateProject({
+        commandId: CommandId.make("docs-vault"),
+        projectId: ProjectId.make("project-1"),
+        docsProjectId: ProjectId.make("docs-project"),
+        docsGate: "off",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(projects).toEqual([
+        {
+          type: "project.update",
+          commandId: "docs-vault",
+          projectId: "project-1",
+          docsProjectId: "docs-project",
+          docsGate: "off",
+        },
       ]);
     }).pipe(Effect.provide(layerTestRandom)),
   );

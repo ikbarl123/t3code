@@ -42,6 +42,7 @@ import { layerRealGit } from "./ProviderTurnStartService.testkit.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as DocsContextService from "../plan/DocsContextService.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import { withInlineContext } from "./ContextHandoffDelivery.ts";
 import * as EventSink from "./EventSink.ts";
@@ -134,6 +135,10 @@ function startWithMissingWorktree(
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(DocsContextService.DocsContextService)({
+          forTurn: () => Effect.succeed(null),
+          commit: () => Effect.void,
+        }),
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
         Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
         IdAllocator.layer,
@@ -915,6 +920,10 @@ function makeLocalCommandHarness(input: {
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(DocsContextService.DocsContextService)({
+          forTurn: () => Effect.succeed(null),
+          commit: () => Effect.void,
+        }),
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
           prepareProviderHandoff: (handoff) =>
             input.sideChat?.nativeForkFrom === undefined

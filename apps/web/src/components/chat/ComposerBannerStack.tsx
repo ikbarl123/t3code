@@ -15,6 +15,8 @@ export type ComposerBannerGroup = "environment" | "attention";
 export interface ComposerBannerStackItem {
   readonly id: string;
   readonly variant: ComposerBannerVariant;
+  /** Overrides the variant's default live-region role. */
+  readonly role?: "status" | "alert";
   readonly group?: ComposerBannerGroup;
   readonly icon: ReactNode;
   readonly title: ReactNode;
@@ -172,7 +174,9 @@ function NoticeCard({
 }) {
   return (
     <ComposerBanner.Root
-      role={item.variant === "error" || item.variant === "warning" ? "alert" : undefined}
+      role={
+        item.role ?? (item.variant === "error" || item.variant === "warning" ? "alert" : undefined)
+      }
       variant={item.variant}
       detached={detached}
       density="comfortable"
