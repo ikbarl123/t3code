@@ -83,8 +83,8 @@ import Migration0077 from "./Migrations/077_RepairBooleanSettledOverride.ts";
 import Migration0078 from "./Migrations/078_DropOrchestrationEventCorrelationIndex.ts";
 import Migration0079 from "./Migrations/079_DelegatedRecoveryIndexes.ts";
 import Migration0080 from "./Migrations/080_ScheduledTaskThreadMode.ts";
-import Migration0081 from "./Migrations/081_ProjectionProjectsLinkedWorkspaces.ts";
-import Migration0082 from "./Migrations/082_ProjectionProjectsDocsSettings.ts";
+import Migration0088 from "./Migrations/088_ProjectionProjectsLinkedWorkspaces.ts";
+import Migration0089 from "./Migrations/089_ProjectionProjectsDocsSettings.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -168,8 +168,8 @@ const migrationEntries = [
   [78, "DropOrchestrationEventCorrelationIndex", Migration0078],
   [79, "DelegatedRecoveryIndexes", Migration0079],
   [80, "ScheduledTaskThreadMode", Migration0080],
-  [81, "ProjectionProjectsLinkedWorkspaces", Migration0081],
-  [82, "ProjectionProjectsDocsSettings", Migration0082],
+  [88, "ProjectionProjectsLinkedWorkspaces", Migration0088],
+  [89, "ProjectionProjectsDocsSettings", Migration0089],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
