@@ -76,6 +76,7 @@ import {
   ThreadId,
   TurnItemId,
   TrimmedNonEmptyString,
+  isRollbackEligibleCheckpoint,
   managedRuntimeModeCeilingMessage,
 } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
@@ -13396,9 +13397,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Checkpoint ${command.checkpointId} was not found.`,
         });
       }
-      // Missing snapshots support conversation rewind only.
+      // Missing snapshots support conversation rewind only, unless a linked repository has one.
       if (
-        targetCheckpoint.status !== "ready" &&
+        !isRollbackEligibleCheckpoint(targetCheckpoint) &&
         !(command.restoreFiles === false && targetCheckpoint.status === "missing")
       ) {
         return yield* new OrchestratorDispatchError({

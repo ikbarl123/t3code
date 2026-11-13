@@ -2,9 +2,12 @@ import {
   CheckpointId,
   CheckpointRef,
   CheckpointScopeId,
+  isRollbackEligibleCheckpoint,
   NodeId,
   OrchestrationV2Checkpoint,
   OrchestrationV2CheckpointScope,
+  type OrchestrationV2RepoCheckpointSnapshot,
+  type ProjectLinkedWorkspace,
   ProviderThreadId,
   RunId,
   ThreadId,
@@ -117,6 +120,7 @@ export interface CheckpointServiceV2Shape {
   readonly captureBaseline: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
     readonly ordinalWithinScope: number;
+    readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
   }) => Effect.Effect<void, CheckpointServiceV2Error>;
   readonly materializeBaselineCheckpoint: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
@@ -126,6 +130,7 @@ export interface CheckpointServiceV2Shape {
     readonly capturedAt: DateTime.Utc;
     /** Records a missing checkpoint without touching git, for side chats sharing a parent's worktree. */
     readonly forceMissing?: boolean;
+    readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
   }) => Effect.Effect<OrchestrationV2Checkpoint, CheckpointServiceV2Error>;
   readonly capture: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
@@ -135,14 +140,17 @@ export interface CheckpointServiceV2Shape {
     readonly appRunOrdinal: number | null;
     readonly capturedAt: DateTime.Utc;
     readonly forceMissing?: boolean;
+    readonly linkedWorkspaces?: ReadonlyArray<ProjectLinkedWorkspace>;
   }) => Effect.Effect<OrchestrationV2Checkpoint, CheckpointServiceV2Error>;
   readonly restore: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
     readonly checkpoint: OrchestrationV2Checkpoint;
-  }) => Effect.Effect<void, CheckpointServiceV2Error>;
+    readonly staleCheckpoints?: ReadonlyArray<OrchestrationV2Checkpoint>;
+  }) => Effect.Effect<{ readonly skippedLinkedRoots: ReadonlyArray<string> }, CheckpointServiceV2Error>;
   readonly deleteStaleRefs: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
     readonly checkpoints: ReadonlyArray<OrchestrationV2Checkpoint>;
+    readonly preserveRoots?: ReadonlyArray<string>;
   }) => Effect.Effect<void, CheckpointServiceV2Error>;
 }
 
@@ -216,6 +224,7 @@ function makeCheckpoint(input: {
   readonly ref: CheckpointRef;
   readonly status: OrchestrationV2Checkpoint["status"];
   readonly files: OrchestrationV2Checkpoint["files"];
+  readonly repoSnapshots?: OrchestrationV2Checkpoint["repoSnapshots"];
   readonly capturedAt: DateTime.Utc;
 }): OrchestrationV2Checkpoint {
   return {
@@ -230,6 +239,9 @@ function makeCheckpoint(input: {
     ref: input.ref,
     status: input.status,
     files: input.files,
+    ...(input.repoSnapshots && input.repoSnapshots.length > 0
+      ? { repoSnapshots: input.repoSnapshots }
+      : {}),
     capturedAt: input.capturedAt,
   };
 }
@@ -247,8 +259,16 @@ export const layer: Layer.Layer<
       checkpointRefForScopeOrdinal(input).pipe(Effect.provideService(Digest.Digest, crypto));
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const workspaceLocks = yield* KeyedLock.make<string>();
-    const withWorkspaceLock = <A, E, R>(cwd: string, effect: Effect.Effect<A, E, R>) =>
-      workspaceLocks.withLock(cwd, effect);
+    const withWorkspaceLocks = <A, E, R>(
+      cwds: ReadonlyArray<string>,
+      effect: Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E, R> => {
+      const sortedUnique = Array.from(new Set(cwds)).toSorted((a, b) => a.localeCompare(b));
+      return sortedUnique.reduceRight(
+        (acc, cwd) => workspaceLocks.withLock(cwd, acc),
+        effect,
+      );
+    };
 
     // A failed probe is an operational error, not proof that the workspace has no repository.
     const probeRepository = (scope: OrchestrationV2CheckpointScope) =>
@@ -264,37 +284,60 @@ export const layer: Layer.Layer<
         ),
       );
 
-    const captureBaseline: CheckpointServiceV2Shape["captureBaseline"] = (input) =>
-      withWorkspaceLock(
-        input.scope.cwd,
-        Effect.gen(function* () {
-          if (!(yield* checkpointStore.isGitRepository(input.scope.cwd))) {
-            return;
-          }
+    const isGitCheckpointable = (cwd: string) =>
+      checkpointStore.isGitRepository(cwd).pipe(Effect.orElseSucceed(() => false));
 
+    const captureBaselineInCwd = Effect.fn("CheckpointService.captureBaselineInCwd")(function* (
+      cwd: string,
+      checkpointRef: CheckpointRef,
+    ) {
+      // A failed probe propagates (as on main); linked callers catch and log it.
+      if (!(yield* checkpointStore.isGitRepository(cwd))) {
+        return;
+      }
+      const exists = yield* checkpointStore.hasCheckpointRef({
+        cwd,
+        checkpointRef,
+      });
+      if (exists) {
+        return;
+      }
+      yield* checkpointStore
+        .captureCheckpoint({
+          cwd,
+          checkpointRef,
+        })
+        .pipe(
+          Effect.timeout(BASELINE_CAPTURE_BUDGET),
+          Effect.catchTags({
+            VcsUnsupportedOperationError: () => Effect.void,
+          }),
+        );
+    });
+
+    const captureBaseline: CheckpointServiceV2Shape["captureBaseline"] = (input) =>
+      withWorkspaceLocks(
+        [
+          input.scope.cwd,
+          ...(input.linkedWorkspaces ?? []).map((workspace) => workspace.workspaceRoot),
+        ],
+        Effect.gen(function* () {
           const checkpointRef = yield* checkpointRefFor({
             scopeId: input.scope.id,
             ordinalWithinScope: input.ordinalWithinScope,
           });
-          const exists = yield* checkpointStore.hasCheckpointRef({
-            cwd: input.scope.cwd,
-            checkpointRef,
-          });
-          if (exists) {
-            return;
-          }
-
-          yield* checkpointStore
-            .captureCheckpoint({
-              cwd: input.scope.cwd,
-              checkpointRef,
-            })
-            .pipe(
-              Effect.timeout(BASELINE_CAPTURE_BUDGET),
-              Effect.catchTags({
-                VcsUnsupportedOperationError: () => Effect.void,
-              }),
+          yield* captureBaselineInCwd(input.scope.cwd, checkpointRef);
+          for (const linked of input.linkedWorkspaces ?? []) {
+            yield* captureBaselineInCwd(linked.workspaceRoot, checkpointRef).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("orchestration V2 linked workspace baseline capture failed", {
+                  scopeId: input.scope.id,
+                  workspaceRoot: linked.workspaceRoot,
+                  cause: String(cause),
+                }),
+              ),
             );
+          }
         }),
       ).pipe(
         Effect.mapError(
@@ -309,8 +352,11 @@ export const layer: Layer.Layer<
 
     const materializeBaselineCheckpoint: CheckpointServiceV2Shape["materializeBaselineCheckpoint"] =
       (input) =>
-        withWorkspaceLock(
-          input.scope.cwd,
+        withWorkspaceLocks(
+          [
+            input.scope.cwd,
+            ...(input.linkedWorkspaces ?? []).map((workspace) => workspace.workspaceRoot),
+          ],
           Effect.gen(function* () {
             const checkpointRef = yield* checkpointRefFor({
               scopeId: input.scope.id,
@@ -340,6 +386,26 @@ export const layer: Layer.Layer<
                       ),
                     )
                 : repository;
+            const repoSnapshots: Array<OrchestrationV2RepoCheckpointSnapshot> = [];
+            for (const linked of input.linkedWorkspaces ?? []) {
+              const linkedCheckpointable =
+                input.forceMissing !== true && (yield* isGitCheckpointable(linked.workspaceRoot));
+              const linkedAvailable = linkedCheckpointable
+                ? yield* checkpointStore
+                    .hasCheckpointRef({
+                      cwd: linked.workspaceRoot,
+                      checkpointRef,
+                    })
+                    .pipe(Effect.orElseSucceed(() => false))
+                : false;
+              repoSnapshots.push({
+                workspaceRoot: linked.workspaceRoot,
+                label: linked.label,
+                ref: checkpointRef,
+                status: linkedAvailable ? "ready" : "missing",
+                files: [],
+              });
+            }
             return makeCheckpoint({
               id: checkpointId,
               scope: input.scope,
@@ -351,6 +417,7 @@ export const layer: Layer.Layer<
               ref: checkpointRef,
               status,
               files: [],
+              ...(repoSnapshots.length > 0 ? { repoSnapshots } : {}),
               capturedAt: input.capturedAt,
             });
           }),
@@ -364,9 +431,75 @@ export const layer: Layer.Layer<
           ),
         );
 
+    const captureRepoDiffFiles = Effect.fn("CheckpointService.captureRepoDiffFiles")(function* (
+      cwd: string,
+      scopeId: CheckpointScopeId,
+      previousCheckpointRef: CheckpointRef,
+      checkpointRef: CheckpointRef,
+    ) {
+        const previousExists = yield* checkpointStore
+          .hasCheckpointRef({
+            cwd,
+            checkpointRef: previousCheckpointRef,
+          })
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("orchestration V2 previous checkpoint ref lookup failed", {
+                scopeId,
+                checkpointRef: previousCheckpointRef,
+                cause: String(cause),
+              }).pipe(Effect.as(false)),
+            ),
+          );
+        if (!previousExists) return [];
+        const refs = {
+          cwd,
+          fromCheckpointRef: previousCheckpointRef,
+          toCheckpointRef: checkpointRef,
+        };
+        return yield* Effect.all([
+          checkpointStore.diffCheckpoints({
+            ...refs,
+            fallbackFromToHead: false,
+            ignoreWhitespace: false,
+            format: "numstat",
+          }),
+          checkpointStore.listAuthoredPaths(refs).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("orchestration V2 checkpoint authored paths failed", {
+                scopeId,
+                checkpointRef,
+                cause: String(cause),
+              }).pipe(Effect.as(null)),
+            ),
+          ),
+        ]).pipe(
+          Effect.map(([diff, authoredPaths]) =>
+            parseTurnDiffFilesFromNumstat(diff)
+              .filter((file) => !isGitImport(file, authoredPaths))
+              .map((file) => ({
+                path: file.path,
+                kind: "modified",
+                additions: file.additions,
+                deletions: file.deletions,
+              })),
+          ),
+          Effect.catch((cause) =>
+            Effect.logWarning("orchestration V2 checkpoint diff summary failed", {
+              scopeId,
+              checkpointRef,
+              cause: String(cause),
+            }).pipe(Effect.as([])),
+          ),
+        );
+      });
+
     const capture: CheckpointServiceV2Shape["capture"] = (input) =>
-      withWorkspaceLock(
-        input.scope.cwd,
+      withWorkspaceLocks(
+        [
+          input.scope.cwd,
+          ...(input.linkedWorkspaces ?? []).map((workspace) => workspace.workspaceRoot),
+        ],
         Effect.gen(function* () {
           const checkpointId = yield* checkpointIdForScopeOrdinal(idAllocator, {
             scopeId: input.scope.id,
@@ -390,7 +523,7 @@ export const layer: Layer.Layer<
 
           const repository =
             input.forceMissing === true ? "missing" : yield* probeRepository(input.scope);
-          if (repository !== "repository") {
+          if (repository === "error") {
             return makeCheckpoint({
               id: checkpointId,
               scope: input.scope,
@@ -400,32 +533,36 @@ export const layer: Layer.Layer<
               ordinalWithinScope: input.ordinalWithinScope,
               appRunOrdinal: input.appRunOrdinal,
               ref: checkpointRef,
-              status: repository,
+              status: "error",
               files: [],
               capturedAt: input.capturedAt,
             });
           }
+          // A missing primary still lets linked repositories be captured.
+          const primaryCheckpointable = repository === "repository";
 
-          const captureStatus = yield* checkpointStore
-            .captureCheckpoint({
-              cwd: input.scope.cwd,
-              checkpointRef,
-            })
-            .pipe(
-              Effect.as("ready" as const),
-              Effect.catchTags({
-                VcsUnsupportedOperationError: () => Effect.succeed("missing" as const),
-              }),
-              Effect.catch((cause) =>
-                Effect.logWarning("orchestration V2 checkpoint capture failed", {
-                  scopeId: input.scope.id,
+          const captureStatus = primaryCheckpointable
+            ? yield* checkpointStore
+                .captureCheckpoint({
+                  cwd: input.scope.cwd,
                   checkpointRef,
-                  cause: String(cause),
-                }).pipe(Effect.as("error" as const)),
-              ),
-            );
+                })
+                .pipe(
+                  Effect.as("ready" as const),
+                  Effect.catchTags({
+                    VcsUnsupportedOperationError: () => Effect.succeed("missing" as const),
+                  }),
+                  Effect.catch((cause) =>
+                    Effect.logWarning("orchestration V2 checkpoint capture failed", {
+                      scopeId: input.scope.id,
+                      checkpointRef,
+                      cause: String(cause),
+                    }).pipe(Effect.as("error" as const)),
+                  ),
+                )
+            : ("missing" as const);
 
-          if (captureStatus !== "ready") {
+          if (captureStatus === "error") {
             return makeCheckpoint({
               id: checkpointId,
               scope: input.scope,
@@ -441,63 +578,68 @@ export const layer: Layer.Layer<
             });
           }
 
-          const previousExists = yield* checkpointStore
-            .hasCheckpointRef({
-              cwd: input.scope.cwd,
-              checkpointRef: previousCheckpointRef,
-            })
-            .pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("orchestration V2 previous checkpoint ref lookup failed", {
-                  scopeId: input.scope.id,
-                  checkpointRef: previousCheckpointRef,
-                  cause: String(cause),
-                }).pipe(Effect.as(false)),
-              ),
-            );
-          const refs = {
-            cwd: input.scope.cwd,
-            fromCheckpointRef: previousCheckpointRef,
-            toCheckpointRef: checkpointRef,
-          };
-          // A pull or rebase can change thousands of files the turn did not write.
-          const files = previousExists
-            ? yield* Effect.all([
-                checkpointStore.diffCheckpoints({
-                  ...refs,
-                  fallbackFromToHead: false,
-                  ignoreWhitespace: false,
-                  format: "numstat",
+          const primaryFiles =
+            captureStatus === "ready"
+              ? yield* captureRepoDiffFiles(
+                  input.scope.cwd,
+                  input.scope.id,
+                  previousCheckpointRef,
+                  checkpointRef,
+                )
+              : [];
+
+          const repoSnapshots: Array<OrchestrationV2RepoCheckpointSnapshot> = [];
+          const linkedPrefixedFiles: Array<OrchestrationV2Checkpoint["files"][number]> = [];
+          for (const linked of input.linkedWorkspaces ?? []) {
+            if (
+              input.forceMissing === true ||
+              !(yield* isGitCheckpointable(linked.workspaceRoot))
+            ) {
+              repoSnapshots.push({
+                workspaceRoot: linked.workspaceRoot,
+                label: linked.label,
+                ref: checkpointRef,
+                status: "missing",
+                files: [],
+              });
+              continue;
+            }
+
+            const linkedStatus = yield* checkpointStore
+              .captureCheckpoint({
+                cwd: linked.workspaceRoot,
+                checkpointRef,
+              })
+              .pipe(
+                Effect.as("ready" as const),
+                Effect.catchTags({
+                  VcsUnsupportedOperationError: () => Effect.succeed("missing" as const),
                 }),
-                checkpointStore.listAuthoredPaths(refs).pipe(
-                  Effect.catch((cause) =>
-                    Effect.logWarning("orchestration V2 checkpoint authored paths failed", {
-                      scopeId: input.scope.id,
-                      checkpointRef,
-                      cause: String(cause),
-                    }).pipe(Effect.as(null)),
-                  ),
-                ),
-              ]).pipe(
-                Effect.map(([diff, authoredPaths]) =>
-                  parseTurnDiffFilesFromNumstat(diff)
-                    .filter((file) => !isGitImport(file, authoredPaths))
-                    .map((file) => ({
-                      path: file.path,
-                      kind: "modified",
-                      additions: file.additions,
-                      deletions: file.deletions,
-                    })),
-                ),
-                Effect.catch((cause) =>
-                  Effect.logWarning("orchestration V2 checkpoint diff summary failed", {
-                    scopeId: input.scope.id,
+                Effect.orElseSucceed(() => "missing" as const),
+              );
+            const linkedFiles =
+              linkedStatus === "ready"
+                ? yield* captureRepoDiffFiles(
+                    linked.workspaceRoot,
+                    input.scope.id,
+                    previousCheckpointRef,
                     checkpointRef,
-                    cause: String(cause),
-                  }).pipe(Effect.as([])),
-                ),
-              )
-            : [];
+                  )
+                : [];
+            repoSnapshots.push({
+              workspaceRoot: linked.workspaceRoot,
+              label: linked.label,
+              ref: checkpointRef,
+              status: linkedStatus,
+              files: linkedFiles,
+            });
+            for (const file of linkedFiles) {
+              linkedPrefixedFiles.push({
+                ...file,
+                path: `[${linked.label}]/${file.path}`,
+              });
+            }
+          }
 
           return makeCheckpoint({
             id: checkpointId,
@@ -508,8 +650,9 @@ export const layer: Layer.Layer<
             ordinalWithinScope: input.ordinalWithinScope,
             appRunOrdinal: input.appRunOrdinal,
             ref: checkpointRef,
-            status: "ready",
-            files,
+            status: captureStatus,
+            files: [...primaryFiles, ...linkedPrefixedFiles],
+            ...(repoSnapshots.length > 0 ? { repoSnapshots } : {}),
             capturedAt: input.capturedAt,
           });
         }),
@@ -524,10 +667,13 @@ export const layer: Layer.Layer<
       );
 
     const restore: CheckpointServiceV2Shape["restore"] = (input) =>
-      withWorkspaceLock(
-        input.scope.cwd,
+      withWorkspaceLocks(
+        [
+          input.scope.cwd,
+          ...(input.checkpoint.repoSnapshots ?? []).map((snapshot) => snapshot.workspaceRoot),
+        ],
         Effect.gen(function* () {
-          if (input.checkpoint.status !== "ready") {
+          if (!isRollbackEligibleCheckpoint(input.checkpoint)) {
             return yield* new CheckpointRestoreError({
               scopeId: input.scope.id,
               checkpointId: input.checkpoint.id,
@@ -535,18 +681,138 @@ export const layer: Layer.Layer<
             });
           }
 
-          const restored = yield* checkpointStore.restoreCheckpoint({
-            cwd: input.scope.cwd,
-            checkpointRef: input.checkpoint.ref,
-            fallbackToHead: false,
-          });
-          if (!restored) {
+          if (input.checkpoint.status === "ready") {
+            const restored = yield* checkpointStore.restoreCheckpoint({
+              cwd: input.scope.cwd,
+              checkpointRef: input.checkpoint.ref,
+              fallbackToHead: false,
+            });
+            if (!restored) {
+              return yield* new CheckpointRestoreError({
+                scopeId: input.scope.id,
+                checkpointId: input.checkpoint.id,
+                cause: "Checkpoint ref is unavailable.",
+              });
+            }
+          }
+          const failedLinkedRestores: Array<{
+            readonly workspaceRoot: string;
+            readonly cause: unknown;
+          }> = [];
+          const skippedLinkedRoots: Array<string> = [];
+          for (const snapshot of input.checkpoint.repoSnapshots ?? []) {
+            if (snapshot.status !== "ready") continue;
+            const candidates = (input.staleCheckpoints ?? []).filter((c) =>
+              c.repoSnapshots?.some(
+                (candidate) =>
+                  candidate.workspaceRoot === snapshot.workspaceRoot && candidate.status === "ready",
+              ),
+            );
+            const latestCandidate =
+              candidates.length > 0
+                ? candidates.reduce((max, candidate) =>
+                    candidate.ordinalWithinScope > max.ordinalWithinScope ? candidate : max,
+                  )
+                : undefined;
+            const latestSnapshot = latestCandidate?.repoSnapshots?.find(
+              (candidate) =>
+                candidate.workspaceRoot === snapshot.workspaceRoot && candidate.status === "ready",
+            );
+            if (latestSnapshot === undefined) {
+              skippedLinkedRoots.push(snapshot.workspaceRoot);
+              yield* Effect.logWarning(
+                "orchestration V2 linked workspace restore skipped because drift cannot be checked",
+                { scopeId: input.scope.id, workspaceRoot: snapshot.workspaceRoot },
+              );
+              continue;
+            }
+            const tempDriftRef = CheckpointRef.make(
+              `${latestSnapshot.ref}-rollback-drift-check`,
+            );
+            const drifted = yield* Effect.gen(function* () {
+              yield* checkpointStore.captureCheckpoint({
+                cwd: snapshot.workspaceRoot,
+                checkpointRef: tempDriftRef,
+              });
+              const patch = yield* checkpointStore.diffCheckpoints({
+                cwd: snapshot.workspaceRoot,
+                fromCheckpointRef: latestSnapshot.ref,
+                toCheckpointRef: tempDriftRef,
+                fallbackFromToHead: false,
+                ignoreWhitespace: false,
+                format: "numstat",
+              });
+              return patch.trim().length > 0;
+            }).pipe(
+              Effect.ensuring(
+                checkpointStore
+                  .deleteCheckpointRefs({
+                    cwd: snapshot.workspaceRoot,
+                    checkpointRefs: [tempDriftRef],
+                  })
+                  .pipe(Effect.ignore),
+              ),
+              Effect.catch((cause) =>
+                Effect.logWarning("orchestration V2 linked workspace drift check failed", {
+                  scopeId: input.scope.id,
+                  workspaceRoot: snapshot.workspaceRoot,
+                  errorTag:
+                    typeof cause === "object" && cause !== null && "_tag" in cause
+                      ? String((cause as { _tag: unknown })._tag)
+                      : undefined,
+                  exitCode:
+                    typeof cause === "object" &&
+                    cause !== null &&
+                    "_tag" in cause &&
+                    (cause as { _tag: unknown })._tag === "VcsProcessExitError" &&
+                    "exitCode" in cause
+                      ? (cause as { exitCode: unknown }).exitCode
+                      : undefined,
+                }).pipe(Effect.as(true)),
+              ),
+            );
+            if (drifted) {
+              skippedLinkedRoots.push(snapshot.workspaceRoot);
+              yield* Effect.logWarning(
+                "orchestration V2 linked workspace restore skipped because drift was detected or could not be checked",
+                {
+                  scopeId: input.scope.id,
+                  workspaceRoot: snapshot.workspaceRoot,
+                },
+              );
+              continue;
+            }
+            const exit = yield* Effect.exit(
+              checkpointStore.restoreCheckpoint({
+                cwd: snapshot.workspaceRoot,
+                checkpointRef: snapshot.ref,
+                fallbackToHead: false,
+              }),
+            );
+            if (exit._tag === "Failure") {
+              failedLinkedRestores.push({
+                workspaceRoot: snapshot.workspaceRoot,
+                cause: exit.cause,
+              });
+            } else if (!exit.value) {
+              failedLinkedRestores.push({
+                workspaceRoot: snapshot.workspaceRoot,
+                cause: `Checkpoint ref ${snapshot.ref} is unavailable in ${snapshot.workspaceRoot}.`,
+              });
+            }
+          }
+          if (failedLinkedRestores.length > 0) {
+            const failedRoots = failedLinkedRestores.map((item) => item.workspaceRoot).join(", ");
             return yield* new CheckpointRestoreError({
               scopeId: input.scope.id,
               checkpointId: input.checkpoint.id,
-              cause: "Checkpoint ref is unavailable.",
+              cause: {
+                message: `Failed to restore linked repositories (${failedRoots}). Manual recovery may be needed.`,
+                causes: failedLinkedRestores,
+              },
             });
           }
+          return { skippedLinkedRoots };
         }),
       ).pipe(
         Effect.mapError((cause) =>
@@ -561,11 +827,45 @@ export const layer: Layer.Layer<
       );
 
     const deleteStaleRefs: CheckpointServiceV2Shape["deleteStaleRefs"] = (input) =>
-      withWorkspaceLock(
-        input.scope.cwd,
-        checkpointStore.deleteCheckpointRefs({
-          cwd: input.scope.cwd,
-          checkpointRefs: input.checkpoints.map((checkpoint) => checkpoint.ref),
+      withWorkspaceLocks(
+        [
+          input.scope.cwd,
+          ...input.checkpoints.flatMap((checkpoint) =>
+            (checkpoint.repoSnapshots ?? []).map((snapshot) => snapshot.workspaceRoot),
+          ),
+        ],
+        Effect.gen(function* () {
+          const readyPrimaryRefs = input.checkpoints
+            .filter((checkpoint) => checkpoint.status === "ready")
+            .map((checkpoint) => checkpoint.ref);
+          if (readyPrimaryRefs.length > 0) {
+            yield* checkpointStore
+              .deleteCheckpointRefs({
+                cwd: input.scope.cwd,
+                checkpointRefs: readyPrimaryRefs,
+              })
+              .pipe(Effect.ignore);
+          }
+          const refsByLinkedRoot = new Map<string, Array<CheckpointRef>>();
+          for (const checkpoint of input.checkpoints) {
+            for (const snapshot of checkpoint.repoSnapshots ?? []) {
+              const existing = refsByLinkedRoot.get(snapshot.workspaceRoot) ?? [];
+              existing.push(snapshot.ref);
+              refsByLinkedRoot.set(snapshot.workspaceRoot, existing);
+            }
+          }
+          const preserveSet = new Set(input.preserveRoots ?? []);
+          for (const [workspaceRoot, checkpointRefs] of refsByLinkedRoot) {
+            if (preserveSet.has(workspaceRoot)) {
+              continue;
+            }
+            yield* checkpointStore
+              .deleteCheckpointRefs({
+                cwd: workspaceRoot,
+                checkpointRefs,
+              })
+              .pipe(Effect.ignore);
+          }
         }),
       ).pipe(
         Effect.mapError(

@@ -14,6 +14,7 @@ import {
   type ToolActivitySource,
   type ThreadId,
   type TurnItemId,
+  isRollbackEligibleCheckpoint,
 } from "@t3tools/contracts";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 import {

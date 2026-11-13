@@ -5,6 +5,7 @@ import {
   type OrchestrationProjectShell,
   StoredProjectIcon,
   ProjectId,
+  ProjectLinkedWorkspace,
   ProjectScript,
   ThreadEnvMode,
 } from "@t3tools/contracts";
@@ -42,6 +43,7 @@ export const ProjectRow = Schema.Struct({
   scripts: Schema.Array(ProjectScript),
   docsProjectId: Schema.optional(Schema.NullOr(ProjectId)),
   docsGate: Schema.optional(Schema.Literals(["off", "warn"])),
+  linkedWorkspaces: Schema.optional(Schema.Array(ProjectLinkedWorkspace)),
   pinnedAt: Schema.NullOr(IsoDateTime),
   archivedAt: Schema.NullOr(IsoDateTime),
   createdAt: IsoDateTime,
@@ -57,6 +59,7 @@ const ProjectDbRow = Schema.Struct({
   autoPull: Schema.BooleanFromBit,
   projectIcon: Schema.NullOr(Schema.fromJsonString(StoredProjectIcon)),
   scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+  linkedWorkspaces: Schema.fromJsonString(Schema.Array(ProjectLinkedWorkspace)),
 });
 
 function toShell(row: ProjectRow): OrchestrationProjectShell {
@@ -74,6 +77,9 @@ function toShell(row: ProjectRow): OrchestrationProjectShell {
     scripts: row.scripts,
     docsProjectId: row.docsProjectId,
     docsGate: row.docsGate,
+    ...(row.linkedWorkspaces && row.linkedWorkspaces.length > 0
+      ? { linkedWorkspaces: row.linkedWorkspaces }
+      : {}),
     pinnedAt: row.pinnedAt,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
@@ -134,6 +140,7 @@ export const make = Effect.gen(function* () {
         scripts_json AS "scripts",
         docs_project_id AS "docsProjectId",
         docs_gate AS "docsGate",
+        linked_workspaces_json AS "linkedWorkspaces",
         pinned_at AS "pinnedAt",
         archived_at AS "archivedAt",
         created_at AS "createdAt",
@@ -153,7 +160,7 @@ export const make = Effect.gen(function* () {
   });
 
   const upsertRow = (row: ProjectRow) =>
-    encodeRow(row).pipe(
+    encodeRow({ ...row, linkedWorkspaces: row.linkedWorkspaces ?? [] }).pipe(
       Effect.flatMap(
         (encoded) => sql`
           INSERT INTO projection_projects (
@@ -169,6 +176,7 @@ export const make = Effect.gen(function* () {
             scripts_json,
             docs_project_id,
             docs_gate,
+            linked_workspaces_json,
             pinned_at,
             archived_at,
             created_at,
@@ -188,6 +196,7 @@ export const make = Effect.gen(function* () {
             ${encoded.scripts},
             ${encoded.docsProjectId},
             ${encoded.docsGate},
+            ${encoded.linkedWorkspaces},
             ${encoded.pinnedAt},
             ${encoded.archivedAt},
             ${encoded.createdAt},
@@ -211,6 +220,7 @@ export const make = Effect.gen(function* () {
             scripts_json = excluded.scripts_json,
             docs_project_id = excluded.docs_project_id,
             docs_gate = excluded.docs_gate,
+            linked_workspaces_json = excluded.linked_workspaces_json,
             pinned_at = excluded.pinned_at,
             archived_at = excluded.archived_at,
             created_at = excluded.created_at,
@@ -264,6 +274,7 @@ export const make = Effect.gen(function* () {
           scripts: payload.scripts,
           docsProjectId: null,
           docsGate: "warn",
+          linkedWorkspaces: payload.linkedWorkspaces ?? [],
           pinnedAt: null,
           archivedAt: null,
           createdAt: payload.createdAt,
@@ -298,6 +309,9 @@ export const make = Effect.gen(function* () {
         ...(payload.scripts === undefined ? {} : { scripts: payload.scripts }),
         ...(payload.docsProjectId === undefined ? {} : { docsProjectId: payload.docsProjectId }),
         ...(payload.docsGate === undefined ? {} : { docsGate: payload.docsGate }),
+        ...(payload.linkedWorkspaces === undefined
+          ? {}
+          : { linkedWorkspaces: payload.linkedWorkspaces }),
         ...(payload.pinnedAt === undefined ? {} : { pinnedAt: payload.pinnedAt }),
         ...(payload.archivedAt === undefined ? {} : { archivedAt: payload.archivedAt }),
         updatedAt: payload.updatedAt,

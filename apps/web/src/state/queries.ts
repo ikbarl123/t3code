@@ -430,6 +430,7 @@ export function useCheckpointDiff(
             threadId: target.threadId!,
             toTurnCount: target.toTurnCount!,
             ignoreWhitespace: target.ignoreWhitespace,
+            ...(target.workspaceRoot ? { workspaceRoot: target.workspaceRoot } : {}),
           },
         }
       : null;
@@ -442,6 +443,7 @@ export function useCheckpointDiff(
             fromTurnCount: target.fromTurnCount!,
             toTurnCount: target.toTurnCount!,
             ignoreWhitespace: target.ignoreWhitespace,
+            ...(target.workspaceRoot ? { workspaceRoot: target.workspaceRoot } : {}),
           },
         }
       : null;
