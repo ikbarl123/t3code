@@ -42,6 +42,7 @@ import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { useClientSettings } from "../../hooks/useSettings";
 import { GuestShareIndicator } from "./GuestShareControls";
+import { ThreadPlanControl } from "./ThreadPlan";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -50,6 +51,8 @@ interface ChatHeaderProps {
   activeThreadLinkOrigin?: string | null | undefined;
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
+  planPickerOpen?: boolean;
+  onPlanPickerOpenChange?: (open: boolean) => void;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
@@ -75,6 +78,8 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadLinkOrigin,
   isServerThread,
   activeProject,
+  planPickerOpen,
+  onPlanPickerOpenChange,
   parentThreadLink,
   onOpenThread,
   rightPanelOpen,
@@ -393,6 +398,15 @@ export const ChatHeader = memo(function ChatHeader({
           ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {isServerThread && activeProject?.docsProjectId ? (
+        <ThreadPlanControl
+          environmentId={activeThreadEnvironmentId}
+          threadId={activeThreadId}
+          docsProjectId={activeProject.docsProjectId}
+          open={planPickerOpen}
+          onOpenChange={onPlanPickerOpenChange}
+        />
+      ) : null}
       {isServerThread ? <GuestShareIndicator threadRef={activeThreadRef} /> : null}
     </div>
   );

@@ -1929,6 +1929,49 @@ it.effect("replays a thread.create receipt without changing the thread", () =>
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("binds and unbinds a plan path through commands, leaving activity time alone", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:plan-bind-dispatch");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create:plan-bind-dispatch"),
+      threadId,
+      projectId: ProjectId.make("project:plan-bind-dispatch"),
+      title: "Plan bind",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const created = yield* projections.getThread(threadId);
+    assert.isUndefined(created.planPath);
+
+    yield* orchestrator.dispatch({
+      type: "thread.plan.bind",
+      commandId: CommandId.make("plan-bind:bind"),
+      threadId,
+      planPath: "docs/plans/2026-11-11-x.md",
+    });
+    const bound = yield* projections.getThread(threadId);
+    assert.equal(bound.planPath, "docs/plans/2026-11-11-x.md");
+    assert.deepEqual(bound.updatedAt, created.updatedAt);
+
+    yield* orchestrator.dispatch({
+      type: "thread.plan.unbind",
+      commandId: CommandId.make("plan-bind:unbind"),
+      threadId,
+    });
+    const unbound = yield* projections.getThread(threadId);
+    assert.equal(unbound.planPath, null);
+    assert.deepEqual(unbound.updatedAt, created.updatedAt);
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("explicit settle clears snooze atomically and stays idempotent after re-snoozing", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;

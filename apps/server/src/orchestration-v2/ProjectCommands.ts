@@ -37,6 +37,8 @@ export interface ProjectMetaUpdateCommand {
   readonly faviconPath?: string | null;
   readonly projectIcon?: ProjectIconOverride | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
+  readonly docsProjectId?: ProjectId | null;
+  readonly docsGate?: "off" | "warn";
   readonly pinned?: boolean;
   readonly archived?: boolean;
 }
@@ -210,6 +212,8 @@ export function planProjectCommand(input: {
           ...(command.faviconPath === undefined ? {} : { faviconPath: command.faviconPath }),
           ...(command.projectIcon === undefined ? {} : { projectIcon: command.projectIcon }),
           ...(command.scripts === undefined ? {} : { scripts: command.scripts }),
+          ...(command.docsProjectId === undefined ? {} : { docsProjectId: command.docsProjectId }),
+          ...(command.docsGate === undefined ? {} : { docsGate: command.docsGate }),
           // Repeating a pin or archive keeps the original time.
           ...(command.pinned === undefined
             ? {}

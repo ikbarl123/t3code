@@ -199,6 +199,8 @@ export const make = Effect.gen(function* () {
     autoPull: row.autoPull,
     projectIcon: row.projectIcon,
     scripts: row.scripts,
+    docsProjectId: row.docsProjectId,
+    docsGate: row.docsGate,
     pinnedAt: row.pinnedAt,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
@@ -426,6 +428,8 @@ export const make = Effect.gen(function* () {
           ? {}
           : { defaultThreadEnvMode: input.defaultThreadEnvMode }),
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+        ...(input.docsProjectId === undefined ? {} : { docsProjectId: input.docsProjectId }),
+        ...(input.docsGate === undefined ? {} : { docsGate: input.docsGate }),
         ...(input.pinned === undefined ? {} : { pinned: input.pinned }),
         ...(input.archived === undefined ? {} : { archived: input.archived }),
       });

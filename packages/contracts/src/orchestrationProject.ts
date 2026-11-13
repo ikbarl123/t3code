@@ -20,6 +20,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectIcon: Schema.optional(Schema.NullOr(ReceivedProjectIcon)),
   scripts: Schema.Array(ProjectScript),
+  docsProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  docsGate: Schema.optional(Schema.Literals(["off", "warn"])),
   // Pinned projects lead project pickers; archived ones leave them. Optional so older servers decode.
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),

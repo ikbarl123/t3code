@@ -67,6 +67,8 @@ export interface UpdateProjectInput extends CommandMetadata {
   readonly workspaceRoot?: string;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly autoPull?: boolean;
+  readonly docsProjectId?: ProjectId | null;
+  readonly docsGate?: "off" | "warn";
   readonly projectIcon?: ProjectIconOverride | null;
   readonly faviconPath?: string | null;
   readonly defaultThreadEnvMode?: ThreadEnvMode | null;
@@ -398,6 +400,8 @@ const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
         readonly title?: string;
         readonly workspaceRoot?: string;
         readonly defaultModelSelection?: ModelSelection | null;
+        readonly docsProjectId?: ProjectId | null;
+        readonly docsGate?: "off" | "warn";
         readonly scripts?: ReadonlyArray<ProjectScript>;
       }
     | {
@@ -442,6 +446,8 @@ export const updateProject = Effect.fn("EnvironmentCommands.updateProject")(func
       ? {}
       : { defaultModelSelection: input.defaultModelSelection }),
     ...(input.autoPull === undefined ? {} : { autoPull: input.autoPull }),
+    ...(input.docsProjectId === undefined ? {} : { docsProjectId: input.docsProjectId }),
+    ...(input.docsGate === undefined ? {} : { docsGate: input.docsGate }),
     ...(input.projectIcon === undefined ? {} : { projectIcon: input.projectIcon }),
     ...(input.faviconPath === undefined ? {} : { faviconPath: input.faviconPath }),
     ...(input.defaultThreadEnvMode === undefined
@@ -612,6 +618,30 @@ export const reorderActiveThread = Effect.fn("EnvironmentCommands.reorderActiveT
     commandId: yield* allocateCommandId(input),
     threadId: input.threadId,
     orderKey: input.orderKey,
+  });
+});
+
+export interface BindThreadPlanInput extends ThreadCommandInput {
+  readonly planPath: string;
+}
+export const bindThreadPlan = Effect.fn("EnvironmentCommands.bindThreadPlan")(function* (
+  input: BindThreadPlanInput,
+) {
+  return yield* dispatch({
+    type: "thread.plan.bind",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    planPath: input.planPath,
+  });
+});
+
+export const unbindThreadPlan = Effect.fn("EnvironmentCommands.unbindThreadPlan")(function* (
+  input: ThreadCommandInput,
+) {
+  return yield* dispatch({
+    type: "thread.plan.unbind",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
   });
 });
 

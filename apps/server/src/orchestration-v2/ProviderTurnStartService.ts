@@ -34,6 +34,7 @@ import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
+import * as DocsContextService from "../plan/DocsContextService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { makeRestoreMissingWorktree } from "../workspace/restoreMissingWorktree.ts";
 import * as EventSink from "./EventSink.ts";
@@ -162,6 +163,10 @@ export const layer: Layer.Layer<
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
     const restoreMissingWorktree = yield* makeRestoreMissingWorktree;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
+    // Optional: composition roots without a workspace (CLI, tests) simply skip docs injection.
+    const docsContext = Option.getOrNull(
+      yield* Effect.serviceOption(DocsContextService.DocsContextService),
+    );
 
     // Build draining callbacks outside startup scope so they cannot retain full thread history.
     const makeRunControls = (input: {
@@ -1633,7 +1638,17 @@ export const layer: Layer.Layer<
             sideChatHandoff === undefined || compact || goalCommand
               ? ""
               : sideChatHandoff.summaryText;
-          const context = [delivery.context, sideChatContext, restartNote]
+          // Compaction and /goal send text verbatim, so they skip the docs bundle.
+          const docs =
+            compact || goalCommand || docsContext === null
+              ? null
+              : yield* docsContext.forTurn({
+                  // Keyed by provider thread and session: a recovered session has not seen the bundle.
+                  threadId: `${runningProviderThread.id}:${providerSessionId}`,
+                  projectId: projection.thread.projectId,
+                  planPath: projection.thread.planPath ?? null,
+                });
+          const context = [docs?.text ?? "", delivery.context, sideChatContext, restartNote]
             .filter((part) => part !== "")
             .join("\n\n");
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;
@@ -1657,6 +1672,12 @@ export const layer: Layer.Layer<
                 : Effect.void,
             ),
           );
+          // Commit only after acceptance, so a refused prompt re-injects next turn.
+          if (docs !== null && docsContext !== null)
+            yield* docsContext.commit(
+              `${runningProviderThread.id}:${providerSessionId}`,
+              docs.text,
+            );
           // After provider acceptance, failed delivery bookkeeping must not stop live ingestion.
           const nativeThreadId = runningProviderThread.nativeThreadRef?.nativeId;
           yield* Effect.forEach(
@@ -1701,7 +1722,8 @@ export const layer: Layer.Layer<
         retryHandoff.length === 0 &&
         sideChatHandoff === undefined &&
         restartNote === "" &&
-        !noteContinuation
+        !noteContinuation &&
+        (docsContext === null || projection.thread.planPath == null)
           ? session
           : makeDeliverySession(session, startWithHandoffs);
       return runExecution.startRootRun({

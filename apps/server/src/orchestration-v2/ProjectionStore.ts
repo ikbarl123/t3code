@@ -903,6 +903,8 @@ export function applyToProjection(
     case "thread.unpinned":
     case "thread.pin-reordered":
     case "thread.metadata-updated":
+    case "thread.plan-bound":
+    case "thread.plan-unbound":
     case "thread.runtime-mode-updated":
     case "thread.interaction-mode-updated":
     case "thread.model-selection-updated":
@@ -1818,6 +1820,7 @@ export function threadShellFromProjection(
     autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
     pinOrderKey: projection.thread.pinOrderKey ?? null,
     ...(projection.thread.tags?.length ? { tags: projection.thread.tags } : {}),
+    planPath: projection.thread.planPath ?? null,
     lastVisitedAt: projection.thread.lastVisitedAt,
     opens: projection.thread.opens ?? null,
     titleRegeneration: projection.thread.titleRegeneration ?? null,
@@ -2115,6 +2118,7 @@ function shellFromState(input: {
     autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
     pinOrderKey: input.state.thread.pinOrderKey ?? null,
     ...(input.state.thread.tags?.length ? { tags: input.state.thread.tags } : {}),
+    planPath: input.state.thread.planPath ?? null,
     lastVisitedAt: input.state.thread.lastVisitedAt,
     opens: input.state.thread.opens ?? null,
     titleRegeneration: input.state.thread.titleRegeneration ?? null,
@@ -2268,6 +2272,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.visited":
             case "thread.marked-unread":
             case "thread.metadata-updated":
+            case "thread.plan-bound":
+            case "thread.plan-unbound":
             case "thread.pull-request-synced":
             case "thread.runtime-mode-updated":
             case "thread.interaction-mode-updated":
@@ -3085,6 +3091,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.visited" &&
             event.type !== "thread.marked-unread" &&
             event.type !== "thread.metadata-updated" &&
+            event.type !== "thread.plan-bound" &&
+            event.type !== "thread.plan-unbound" &&
             event.type !== "thread.pull-request-synced" &&
             event.type !== "thread.pull-request-link-updated" &&
             event.type !== "thread.runtime-mode-updated" &&

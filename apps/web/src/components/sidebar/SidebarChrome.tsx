@@ -1,4 +1,10 @@
-import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BookOpenIcon,
+  ChartNoAxesColumnIcon,
+  SettingsIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -14,6 +20,7 @@ import {
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
+import { useProjects } from "../../state/entities";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -226,6 +233,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     select: (location) => isSidebarUtilityPage(location.pathname),
   });
   const pullRequestsSupported = usePullRequestsSupported();
+  const docsAvailable = useProjects().some((project) => Boolean(project.docsProjectId));
   const closeMobileSidebar = () => {
     if (isMobile) {
       setOpenMobile(false);
@@ -237,6 +245,10 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       to: "/pull-requests",
       search: readPullRequestListPreferences(),
     });
+  };
+  const handleDocsClick = () => {
+    closeMobileSidebar();
+    void navigate({ to: "/docs" });
   };
   const handleSettingsClick = () => {
     closeMobileSidebar();
@@ -277,6 +289,9 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               label="Pull requests"
               onClick={handlePullRequestsClick}
             />
+          ) : null}
+          {docsAvailable ? (
+            <SidebarUtilityItem icon={<BookOpenIcon />} label="Docs" onClick={handleDocsClick} />
           ) : null}
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
