@@ -72,7 +72,6 @@ function toShell(row: ProjectRow): OrchestrationProjectShell {
     faviconPath: row.faviconPath,
     projectIcon: row.projectIcon,
     scripts: row.scripts,
-      : {}),
     docsProjectId: row.docsProjectId,
     docsGate: row.docsGate,
     pinnedAt: row.pinnedAt,

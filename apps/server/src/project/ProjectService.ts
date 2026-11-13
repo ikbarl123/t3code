@@ -199,7 +199,6 @@ export const make = Effect.gen(function* () {
     autoPull: row.autoPull,
     projectIcon: row.projectIcon,
     scripts: row.scripts,
-      : {}),
     docsProjectId: row.docsProjectId,
     docsGate: row.docsGate,
     pinnedAt: row.pinnedAt,
